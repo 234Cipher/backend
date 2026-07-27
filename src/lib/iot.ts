@@ -58,6 +58,52 @@ function seededRandom(seed: number): number {
   return h / 0xffffffff;
 }
 
+// ── In-memory IoT data cache (#221) ──────────────────────────────────────────
+
+interface CacheEntry<T> {
+  value: T;
+  expiresAt: number;
+}
+
+const _cache = new Map<string, CacheEntry<unknown>>();
+
+/** Returns milliseconds until the top of the next hour (minimum 1 ms). */
+function msUntilNextHour(): number {
+  const now = new Date();
+  const ms =
+    (60 - now.getMinutes()) * 60_000 - now.getSeconds() * 1_000 - now.getMilliseconds();
+  return ms > 0 ? ms : 3_600_000;
+}
+
+/**
+ * Wraps a synchronous data-fetch function with an in-memory TTL cache.
+ *
+ * Cache key format: `solar:${projectId}:${hourSeed}` (or any caller-chosen key).
+ * TTL defaults to the remainder of the current hour so cached values never
+ * cross an hour boundary.  Set `IOT_CACHE_DISABLED=true` to bypass entirely.
+ */
+export function withIotCache<T>(key: string, fn: () => T, ttlMs?: number): T {
+  if (process.env.IOT_CACHE_DISABLED === "true") {
+    return fn();
+  }
+
+  const now = Date.now();
+  const entry = _cache.get(key) as CacheEntry<T> | undefined;
+
+  if (entry && entry.expiresAt > now) {
+    return entry.value;
+  }
+
+  const value = fn();
+  _cache.set(key, { value, expiresAt: now + (ttlMs ?? msUntilNextHour()) });
+  return value;
+}
+
+/** Clears all cached IoT entries. Intended for tests only. */
+export function clearIotCache(): void {
+  _cache.clear();
+}
+
 export function getSolarData(projectId: number) {
   if (projectId == null || Number.isNaN(projectId)) {
     logger.warn("getSolarData called with null/NaN projectId, using defaults", { projectId });
