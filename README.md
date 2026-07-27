@@ -2,6 +2,15 @@
 
 Node.js oracle server for the Heliobond platform. It simulates IoT sensor data for solar panel and satellite readings, computes impact scores from that data, and submits `update_impact_score` transactions to the Soroban **ProjectRegistry** contract on Stellar. An hourly cron job keeps on-chain scores current automatically; the same logic is exposed over REST for on-demand updates.
 
+## System Overview
+
+Heliobond is a comprehensive platform for green energy investment tracking and impact scoring. The system consists of multiple components:
+
+- **Backend API (this repository)**: Node.js/TypeScript server that computes impact scores and interacts with the Stellar blockchain
+- **Frontend**: User interface for viewing projects and impact scores
+- **Blockchain Contracts**: Soroban smart contracts for project registry and investment tracking
+- **Data Processing**: Components for handling IoT data and financial calculations
+
 ---
 
 ## Architecture
@@ -241,6 +250,37 @@ bun run build        # tsc type-check
 bun run test         # jest suite
 ```
 
+## Deployment
+
+### Docker
+Build and run using Docker:
+```bash
+docker build -t heliobond-backend .
+docker run -p 3001:3001 --env-file .env heliobond-backend
+```
+
+### Docker Compose
+Use the provided docker-compose.yml for local development with all dependencies:
+```bash
+docker-compose up
+```
+
+### Production Deployment
+For production deployments, consider:
+1. Using a process manager like PM2 or systemd
+2. Setting up a reverse proxy (Nginx, Caddy)
+3. Configuring SSL/TLS certificates
+4. Implementing proper monitoring and alerting
+
+## Monitoring and Observability
+
+The application includes OpenTelemetry instrumentation for:
+- **Distributed Tracing**: Track requests across services
+- **Metrics**: Monitor performance and resource usage
+- **Logging**: Structured logging with correlation IDs
+
+Configure OpenTelemetry exporters in your environment to send data to your preferred observability platform (Jaeger, Zipkin, Prometheus, etc.).
+
 ---
 
 ## Tech Stack
@@ -254,3 +294,54 @@ bun run test         # jest suite
 | Scheduler | `node-cron` v4 |
 | Package manager / test runner | Bun |
 | Test framework | Jest + ts-jest + Supertest |
+| Database | PostgreSQL (via Knex.js) |
+| API Documentation | Swagger/OpenAPI |
+| Monitoring | OpenTelemetry |
+| Containerization | Docker |
+| CI/CD | GitHub Actions |
+
+## Development Guidelines
+
+### Code Quality
+- Use TypeScript strict mode
+- Follow ESLint and Prettier configuration
+- Write comprehensive tests for new features
+- Maintain test coverage above 80%
+
+### Testing
+Run the test suite with:
+```bash
+bun run test           # Run all tests
+bun run test:coverage  # Run tests with coverage report
+```
+
+### Code Style
+- Use meaningful variable and function names
+- Add JSDoc comments for public APIs
+- Follow the existing code patterns and architecture
+- Keep functions small and focused on single responsibilities
+
+## API Documentation
+
+Comprehensive API documentation is available in multiple formats:
+
+### Interactive Documentation
+After starting the server, visit `http://localhost:3001/api-docs` for interactive Swagger UI documentation.
+
+### API Specification
+The full OpenAPI specification is available at `http://localhost:3001/api-docs.json`.
+
+### API.md Reference
+Detailed API reference with examples and error codes is available in [API.md](./API.md).
+
+## Contributing
+
+Please read [CONTRIBUTING.md](./CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+
+## Security
+
+For security concerns, please review [SECURITY.md](./SECURITY.md) and report vulnerabilities through the appropriate channels.
+
+## License
+
+This project is licensed under the terms in the [LICENSE](./LICENSE) file.
