@@ -9,16 +9,18 @@ export interface ImpactScores {
 }
 
 function clamp(v: number, min: number, max: number): number {
+  if (isNaN(v)) return 0;
   return Math.max(min, Math.min(max, v));
 }
 
 export function computeScores(input: IotInput): ImpactScores {
   const { solar, satellite } = input;
-  const credit_quality = Math.round(clamp(solar.efficiency_pct, 0, 100));
+  const credit_quality = Math.round(clamp(isNaN(solar.efficiency_pct) ? 0 : solar.efficiency_pct, 0, 100));
+  const powerRatio = solar.max_power_kw === 0 ? 0 : solar.power_output_kw / solar.max_power_kw;
   const green_impact = Math.round(
     clamp(
-      (solar.power_output_kw / solar.max_power_kw) * 50 +
-        (satellite.forest_density_pct / 100) * 50,
+      powerRatio * 50 +
+      (satellite.forest_density_pct / 100) * 50,
       0,
       100
     )

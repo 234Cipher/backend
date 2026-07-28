@@ -38,9 +38,14 @@ function parseProjectIds(body: unknown): number[] | null {
 // POST /api/admin/update-scores
 // Body: { project_ids?: number[] }  — defaults to all projects
 // Returns: { updated: number, results: [...], errors: [...] }
-router.post("/update-scores", async (req: Request, res: Response) => {
-  // Validation throws ApiError -> handled by the central error middleware as 400.
-  const requested = parseProjectIds(req.body);
+router.post("/update-scores", async (req: Request, res: Response, next: NextFunction) => {
+  let requested: number[] | null;
+  try {
+    // Validation throws ApiError -> caught here and forwarded to error middleware.
+    requested = parseProjectIds(req.body);
+  } catch (err) {
+    return next(err);
+  }
 
   try {
     let projectIds: number[];

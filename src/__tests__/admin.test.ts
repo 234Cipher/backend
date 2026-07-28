@@ -1,6 +1,12 @@
+/**
+ * @jest-environment node
+ */
+process.env.PROJECT_REGISTRY_CONTRACT_ID = "CCJZK7ZYK5N4T6Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5";
+
 import request from "supertest";
 import express, { Express } from "express";
 import adminRouter from "../routes/admin";
+import { errorHandler, notFoundHandler } from "../middleware/errors";
 import * as registry from "../lib/registry";
 import * as iot from "../routes/iot";
 import * as scoring from "../lib/scoring";
@@ -16,6 +22,8 @@ describe("admin routes", () => {
     app = express();
     app.use(express.json());
     app.use("/api/admin", adminRouter);
+    app.use(notFoundHandler);
+    app.use(errorHandler);
 
     process.env.ADMIN_API_KEY = "test-key";
 
@@ -107,7 +115,7 @@ describe("admin routes", () => {
         .post("/api/admin/update-scores")
         .send({})
         .expect(401)
-        .expect({ error: "unauthorized" });
+        .expect({ error: "unauthorized", message: "Missing or invalid bearer token" });
     });
 
     it("should return 401 when authorization header has wrong token", async () => {
@@ -116,7 +124,7 @@ describe("admin routes", () => {
         .set("Authorization", "Bearer wrong-key")
         .send({})
         .expect(401)
-        .expect({ error: "unauthorized" });
+        .expect({ error: "unauthorized", message: "Missing or invalid bearer token" });
     });
 
     it("should return 401 when authorization format is invalid", async () => {
@@ -125,7 +133,7 @@ describe("admin routes", () => {
         .set("Authorization", "test-key")
         .send({})
         .expect(401)
-        .expect({ error: "unauthorized" });
+        .expect({ error: "unauthorized", message: "Missing or invalid bearer token" });
     });
   });
 
@@ -136,8 +144,11 @@ describe("admin routes", () => {
         .set("Authorization", "Bearer test-key")
         .send({ project_ids: "not-an-array" });
 
-      expect(res.status).toBe(200);
-      expect(registry.getTotalProjects).toHaveBeenCalled();
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({
+        error: "bad_request",
+        message: "project_ids must be an array of positive integers",
+      });
     });
 
     it("should return 400 when project_ids array is empty", async () => {
@@ -160,6 +171,56 @@ describe("admin routes", () => {
         .post("/api/admin/update-scores")
         .set("Authorization", "Bearer test-key")
         .send({ project_ids: [] });
+
+      expect(res.status).toBe(200);
+      expect(registry.getTotalProjects).toHaveBeenCalled();
+    });
+
+    it("should fall through to all projects when project_ids is null", async () => {
+      (registry.getTotalProjects as jest.Mock).mockResolvedValue(1);
+      (iot.getSolarData as jest.Mock).mockReturnValue({
+        efficiency_pct: 85,
+        power_output_kw: 500,
+        max_power_kw: 1000,
+      });
+      (iot.getSatelliteData as jest.Mock).mockReturnValue({
+        forest_density_pct: 60,
+        ndvi_score: 0.6,
+      });
+      (scoring.computeScores as jest.Mock).mockReturnValue({
+        credit_quality: 85,
+        green_impact: 70,
+      });
+
+      const res = await request(app)
+        .post("/api/admin/update-scores")
+        .set("Authorization", "Bearer test-key")
+        .send({ project_ids: null });
+
+      expect(res.status).toBe(200);
+      expect(registry.getTotalProjects).toHaveBeenCalled();
+    });
+
+    it("should fall through to all projects when project_ids is missing", async () => {
+      (registry.getTotalProjects as jest.Mock).mockResolvedValue(1);
+      (iot.getSolarData as jest.Mock).mockReturnValue({
+        efficiency_pct: 85,
+        power_output_kw: 500,
+        max_power_kw: 1000,
+      });
+      (iot.getSatelliteData as jest.Mock).mockReturnValue({
+        forest_density_pct: 60,
+        ndvi_score: 0.6,
+      });
+      (scoring.computeScores as jest.Mock).mockReturnValue({
+        credit_quality: 85,
+        green_impact: 70,
+      });
+
+      const res = await request(app)
+        .post("/api/admin/update-scores")
+        .set("Authorization", "Bearer test-key")
+        .send({});
 
       expect(res.status).toBe(200);
       expect(registry.getTotalProjects).toHaveBeenCalled();
