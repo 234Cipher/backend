@@ -37,9 +37,35 @@ const PERMANENT_ERROR_PATTERNS = [
   "ADMIN_SECRET_KEY not set",
 ];
 
+/** HTTP status codes that indicate a permanent (client) failure — retrying won't help. */
+const PERMANENT_HTTP_STATUSES = new Set([400, 401, 403, 404, 409, 422]);
+
+interface StatusCarryingError {
+  status?: number;
+  statusCode?: number;
+  response?: { status?: number };
+}
+
+/** Pulls an HTTP-style status code off an error, from either a property or the message text. */
+function extractHttpStatus(err: unknown): number | undefined {
+  if (err && typeof err === "object") {
+    const { status, statusCode, response } = err as StatusCarryingError;
+    const direct = status ?? statusCode ?? response?.status;
+    if (typeof direct === "number") return direct;
+  }
+  const msg = err instanceof Error ? err.message : String(err);
+  const match = msg.match(/\b([45]\d{2})\b/);
+  return match ? Number(match[1]) : undefined;
+}
+
 export function isTransientError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   if (PERMANENT_ERROR_PATTERNS.some((p) => msg.includes(p))) return false;
+
+  const status = extractHttpStatus(err);
+  if (status !== undefined && PERMANENT_HTTP_STATUSES.has(status)) return false;
+
+  // Anything else — timeouts, network errors, 5xx/429, unknown errors — is retried.
   return true;
 }
 

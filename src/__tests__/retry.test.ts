@@ -36,6 +36,42 @@ describe("isTransientError", () => {
     expect(isTransientError("timeout")).toBe(true);
     expect(isTransientError(500)).toBe(true);
   });
+
+  // ── HTTP-style classification (transient vs permanent) ──────────────────────
+
+  it("returns true for a timeout error", () => {
+    expect(isTransientError(new Error("timeout of 5000ms exceeded"))).toBe(true);
+  });
+
+  it("returns true for a 503 (service unavailable)", () => {
+    expect(isTransientError(new Error("request failed with status code 503"))).toBe(true);
+    expect(isTransientError({ status: 503 })).toBe(true);
+  });
+
+  it("returns true for a generic network error", () => {
+    expect(isTransientError(new Error("network error"))).toBe(true);
+    expect(isTransientError(new Error("ECONNREFUSED"))).toBe(true);
+  });
+
+  it("returns false for a 400 (bad request)", () => {
+    expect(isTransientError(new Error("request failed with status code 400"))).toBe(false);
+    expect(isTransientError({ status: 400 })).toBe(false);
+  });
+
+  it("returns false for a 422 (unprocessable entity)", () => {
+    expect(isTransientError(new Error("request failed with status code 422"))).toBe(false);
+    expect(isTransientError({ status: 422 })).toBe(false);
+  });
+
+  it("returns false for a 404 (not found)", () => {
+    expect(isTransientError(new Error("request failed with status code 404"))).toBe(false);
+    expect(isTransientError({ status: 404 })).toBe(false);
+  });
+
+  it("reads status off statusCode and response.status too", () => {
+    expect(isTransientError({ statusCode: 400 })).toBe(false);
+    expect(isTransientError({ response: { status: 404 } })).toBe(false);
+  });
 });
 
 // ── backoffDelay ──────────────────────────────────────────────────────────────
@@ -45,7 +81,7 @@ describe("backoffDelay", () => {
     maxAttempts: 4,
     baseDelayMs: 200,
     maxDelayMs: 30_000,
-    jitter: 0,          // zero jitter → deterministic
+    jitter: 0, // zero jitter → deterministic
     label: "test",
   };
 
@@ -109,35 +145,69 @@ describe("withRetry", () => {
   it("throws immediately on a permanent error without retrying", async () => {
     const fn = jest.fn().mockRejectedValue(new Error("tx_bad_auth"));
     const p = withRetry(fn, { maxAttempts: 4, baseDelayMs: 10, jitter: 0 });
-    await jest.runAllTimersAsync();
-    await expect(p).rejects.toThrow("tx_bad_auth");
+    await Promise.all([expect(p).rejects.toThrow("tx_bad_auth"), jest.runAllTimersAsync()]);
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
   it("exhausts all attempts and re-throws when fn always fails transiently", async () => {
     const fn = jest.fn().mockRejectedValue(new Error("ECONNRESET"));
     const p = withRetry(fn, { maxAttempts: 3, baseDelayMs: 10, jitter: 0 });
-    await jest.runAllTimersAsync();
-    await expect(p).rejects.toThrow("ECONNRESET");
+    await Promise.all([expect(p).rejects.toThrow("ECONNRESET"), jest.runAllTimersAsync()]);
     expect(fn).toHaveBeenCalledTimes(3);
   });
 
   it("respects maxAttempts=1 — no retries at all", async () => {
     const fn = jest.fn().mockRejectedValue(new Error("timeout"));
     const p = withRetry(fn, { maxAttempts: 1, baseDelayMs: 10, jitter: 0 });
-    await jest.runAllTimersAsync();
-    await expect(p).rejects.toThrow("timeout");
+    await Promise.all([expect(p).rejects.toThrow("timeout"), jest.runAllTimersAsync()]);
     expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Acceptance criteria ──────────────────────────────────────────────────────
+
+  it("timeout → retries", async () => {
+    const fn = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("timeout of 5000ms exceeded"))
+      .mockResolvedValue("ok");
+    const p = withRetry(fn, { maxAttempts: 3, baseDelayMs: 10, jitter: 0 });
+    await jest.runAllTimersAsync();
+    await expect(p).resolves.toBe("ok");
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it("503 → retries", async () => {
+    const fn = jest
+      .fn()
+      .mockRejectedValueOnce({ status: 503, message: "Service Unavailable" })
+      .mockResolvedValue("ok");
+    const p = withRetry(fn, { maxAttempts: 3, baseDelayMs: 10, jitter: 0 });
+    await jest.runAllTimersAsync();
+    await expect(p).resolves.toBe("ok");
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it("400 → no retry", async () => {
+    const fn = jest.fn().mockRejectedValue({ status: 400, message: "Bad Request" });
+    const p = withRetry(fn, { maxAttempts: 4, baseDelayMs: 10, jitter: 0 });
+    await Promise.all([expect(p).rejects.toMatchObject({ status: 400 }), jest.runAllTimersAsync()]);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("max retries exceeded → failure", async () => {
+    const fn = jest.fn().mockRejectedValue(new Error("timeout"));
+    const p = withRetry(fn, { maxAttempts: 5, baseDelayMs: 10, jitter: 0 });
+    await Promise.all([expect(p).rejects.toThrow("timeout"), jest.runAllTimersAsync()]);
+    expect(fn).toHaveBeenCalledTimes(5);
   });
 
   it("uses exponential intervals between retries (base retry 1 = baseDelayMs)", async () => {
     const delays: number[] = [];
-    const realSetTimeout = global.setTimeout;
 
     jest.useRealTimers();
     const spy = jest
       .spyOn(global, "setTimeout")
-      .mockImplementation((cb: TimerHandler, ms?: number) => {
+      .mockImplementation((cb: (...args: unknown[]) => void, ms?: number) => {
         delays.push(ms ?? 0);
         (cb as () => void)();
         return 0 as unknown as ReturnType<typeof setTimeout>;
@@ -151,8 +221,8 @@ describe("withRetry", () => {
 
     await withRetry(fn, { maxAttempts: 4, baseDelayMs: 200, maxDelayMs: 30_000, jitter: 0 });
 
-    expect(delays[0]).toBe(200);   // attempt 0 → 200ms
-    expect(delays[1]).toBe(400);   // attempt 1 → 400ms
+    expect(delays[0]).toBe(200); // attempt 0 → 200ms
+    expect(delays[1]).toBe(400); // attempt 1 → 400ms
 
     spy.mockRestore();
   });
