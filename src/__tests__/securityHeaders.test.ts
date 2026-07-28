@@ -12,7 +12,7 @@ describe("securityHeaders middleware", () => {
     app.get("/test", (_req, res) => res.json({ ok: true }));
   });
 
-  describe("Helmet Security Headers (Issue #288)", () => {
+  describe("Helmet Security Headers (Issue #269, #288)", () => {
     it("sets X-Content-Type-Options: nosniff", async () => {
       const res = await request(app).get("/test");
       expect(res.headers["x-content-type-options"]).toBe("nosniff");
