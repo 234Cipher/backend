@@ -36,6 +36,15 @@ function floatEnv(name: string, fallback: number): number {
   return parsed;
 }
 
+function validateEnvValue(name: string, value: string, allowedValues?: readonly string[]): void {
+  if (!allowedValues || !value) return;
+  if (!allowedValues.includes(value)) {
+    throw new Error(
+      `Environment variable ${name} must be one of: ${allowedValues.join(", ")}, got "${value}".`,
+    );
+  }
+}
+
 export const config = {
   /** Stellar / Soroban */
   STELLAR_NETWORK: optionalEnv("STELLAR_NETWORK", "testnet") as "testnet" | "mainnet",
@@ -106,6 +115,7 @@ export const config = {
 export function validateRequiredEnv(): void {
   requireEnv("ADMIN_SECRET_KEY");
   requireEnv("PROJECT_REGISTRY_CONTRACT_ID");
+  validateEnvValue("STELLAR_NETWORK", config.STELLAR_NETWORK, ["testnet", "mainnet"]);
 }
 
 /**
