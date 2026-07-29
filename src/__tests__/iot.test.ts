@@ -51,29 +51,28 @@ describe("IoT route validation - non-numeric IDs", () => {
   it("GET /api/iot/solar/abc → 400 with 'invalid project id'", async () => {
     const res = await request(app).get("/api/iot/solar/abc").expect(400);
     expect(res.body).toEqual({
-      error: "bad_request",
-      message: expect.stringContaining("positive integer"),
+      error: { code: "bad_request", message: expect.stringContaining("positive integer") },
     });
   });
 
   it("GET /api/iot/solar/1.5 → 400 with 'invalid project id'", async () => {
     const res = await request(app).get("/api/iot/solar/1.5").expect(400);
     expect(res.body).toEqual({
-      error: "bad_request",
-      message: expect.stringContaining("positive integer"),
+      error: { code: "bad_request", message: expect.stringContaining("positive integer") },
     });
   });
 
   it("GET /api/iot/solar/ → 404 (empty id, no matching route)", async () => {
     const res = await request(app).get("/api/iot/solar/").expect(404);
-    expect(res.body.error).toBe("not_found");
+    expect(res.body).toEqual({
+      error: { code: "not_found", message: expect.stringContaining("/api/iot/solar/") },
+    });
   });
 
   it("GET /api/iot/satellite/abc → 400 with 'invalid project id'", async () => {
     const res = await request(app).get("/api/iot/satellite/abc").expect(400);
     expect(res.body).toEqual({
-      error: "bad_request",
-      message: expect.stringContaining("positive integer"),
+      error: { code: "bad_request", message: expect.stringContaining("positive integer") },
     });
   });
 });
