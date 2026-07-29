@@ -11,6 +11,7 @@ export interface ImpactScores {
 }
 
 function clamp(v: number, min: number, max: number): number {
+  if (isNaN(v)) return 0;
   return Math.max(min, Math.min(max, v));
 }
 

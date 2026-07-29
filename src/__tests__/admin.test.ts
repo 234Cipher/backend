@@ -174,6 +174,17 @@ describe("admin routes", () => {
       expect(registry.getTotalProjects).toHaveBeenCalled();
     });
 
+    it("defaults to all projects when project_ids is null", async () => {
+      const res = await request(app)
+        .post("/api/admin/update-scores")
+        .set(AUTH_HEADER)
+        .send({ project_ids: null })
+        .expect(200);
+
+      expect(res.body.updated).toBe(2);
+      expect(registry.getTotalProjects).toHaveBeenCalled();
+    });
+
     it("defers score when RPC is degraded", async () => {
       const RpcDegradedError = (
         registry as unknown as { RpcDegradedError: new (msg?: string) => Error }

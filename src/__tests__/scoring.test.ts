@@ -108,6 +108,17 @@ describe("computeScores", () => {
     expect(scores.credit_quality).toBe(0);
   });
 
+  it("all NaN inputs → scores are 0, not NaN", () => {
+    const scores = computeScores({
+      solar: { efficiency_pct: NaN, power_output_kw: NaN, max_power_kw: NaN },
+      satellite: { forest_density_pct: NaN, ndvi_score: NaN },
+    });
+    expect(scores.credit_quality).toBe(0);
+    expect(scores.credit_quality).not.toBeNaN();
+    expect(scores.green_impact).not.toBeNaN();
+    expect(scores.green_impact).toBe(0);
+  });
+
   it("mid-range values round correctly", () => {
     // (333/1000)*50 + (33/100)*50 = 16.65 + 16.5 = 33.15 → rounds to 33
     const scores = computeScores({
@@ -117,6 +128,7 @@ describe("computeScores", () => {
     expect(scores.credit_quality).toBe(34);
     expect(scores.green_impact).toBe(33);
   });
+});
 
   // ── Green impact formula edge cases ────────────────────────────────────
 
