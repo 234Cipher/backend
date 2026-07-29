@@ -4,7 +4,8 @@ import { RpcConnectionPool } from "./db-pool";
 import { CircuitBreaker } from "./circuit-breaker";
 import { withRetry, isTransientError } from "./retry";
 
-export const networkPassphrase = config.STELLAR_NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
+export const networkPassphrase =
+  config.STELLAR_NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
 
 export const rpcPool = new RpcConnectionPool({
   rpcUrl: config.RPC_URL,
@@ -67,10 +68,29 @@ export function withRpcConnection<T>(fn: (client: rpc.Server) => Promise<T>): Pr
   );
 }
 
+// ── Admin keypair cache (#227) ───────────────────────────────────────────────
+// Deriving an Ed25519 keypair from the secret is pure CPU work and the secret
+// does not change during the process lifetime, so derive once and reuse. The
+// secret it was derived from is cached alongside it: if the configured secret
+// ever differs, the cache is rebuilt rather than handing back a stale keypair.
+let cachedAdminKeypair: Keypair | null = null;
+let cachedAdminSecret: string | null = null;
+
 export function getAdminKeypair(): Keypair {
   const secretKey = config.ADMIN_SECRET_KEY;
   if (!secretKey) throw new Error("ADMIN_SECRET_KEY not set");
-  return Keypair.fromSecret(secretKey);
+
+  if (cachedAdminKeypair === null || cachedAdminSecret !== secretKey) {
+    cachedAdminKeypair = Keypair.fromSecret(secretKey);
+    cachedAdminSecret = secretKey;
+  }
+  return cachedAdminKeypair;
+}
+
+/** Drop the cached keypair. Intended for tests that swap the configured secret. */
+export function resetAdminKeypairCache(): void {
+  cachedAdminKeypair = null;
+  cachedAdminSecret = null;
 }
 
 // ── FIXED SEQUENCE & CONCURRENCY QUEUE MANAGEMENT ───────────────────────────
@@ -113,16 +133,13 @@ async function _executeSignAndSubmitWithRetry(
   preparedXdr: string,
   keypair: Keypair,
 ): Promise<string> {
-  return withRetry(
-    () => _attemptSubmit(client, preparedXdr, keypair),
-    {
-      maxAttempts: config.TX_MAX_RETRIES,
-      baseDelayMs: config.TX_RETRY_BASE_DELAY_MS,
-      maxDelayMs: config.TX_RETRY_MAX_DELAY_MS,
-      jitter: 0.3,
-      label: "stellar:signAndSubmit",
-    },
-  );
+  return withRetry(() => _attemptSubmit(client, preparedXdr, keypair), {
+    maxAttempts: config.TX_MAX_RETRIES,
+    baseDelayMs: config.TX_RETRY_BASE_DELAY_MS,
+    maxDelayMs: config.TX_RETRY_MAX_DELAY_MS,
+    jitter: 0.3,
+    label: "stellar:signAndSubmit",
+  });
 }
 
 async function _attemptSubmit(
@@ -190,7 +207,7 @@ async function _attemptSubmit(
   }
 
   // 2. Poll for confirmation
-  let getResult: rpc.Api.GetTransactionResponse;
+  let getResult: rpc.Api.GetTransactionResponse | undefined;
   let pollAttempts = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const pollIntervalMs = parseInt(
@@ -211,7 +228,13 @@ async function _attemptSubmit(
     if (timer) clearTimeout(timer);
   }
 
-  if (getResult!.status === rpc.Api.GetTransactionStatus.FAILED) {
+  // The loop above always assigns before exiting normally, but the check keeps
+  // that a runtime guarantee rather than an assertion the compiler has to trust.
+  if (getResult === undefined) {
+    throw new Error("Transaction confirmation never returned a result");
+  }
+
+  if (getResult.status === rpc.Api.GetTransactionStatus.FAILED) {
     throw new Error("Transaction failed on-chain");
   }
 
