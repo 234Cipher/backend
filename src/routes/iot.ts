@@ -2,8 +2,9 @@ import { Router, Request, Response, NextFunction } from "express";
 import { parseProjectId } from "../middleware/errors";
 import { fetchSatelliteWithFallback } from "../lib/satellite-sources";
 import { logger } from "../lib/logger";
+import { config } from "../config";
 
-const MAX_POWER_KW = 1000;
+const MAX_POWER_KW = config.MAX_POWER_KW;
 const DEFAULT_EFFICIENCY_PCT = 60;
 const DEFAULT_FOREST_DENSITY_PCT = 50;
 

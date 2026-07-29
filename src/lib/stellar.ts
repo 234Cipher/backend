@@ -4,7 +4,8 @@ import { RpcConnectionPool } from "./db-pool";
 import { CircuitBreaker } from "./circuit-breaker";
 import { withRetry, isTransientError } from "./retry";
 
-export const networkPassphrase = config.STELLAR_NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
+export const networkPassphrase =
+  config.STELLAR_NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
 
 export const rpcPool = new RpcConnectionPool({
   rpcUrl: config.RPC_URL,
@@ -113,16 +114,13 @@ async function _executeSignAndSubmitWithRetry(
   preparedXdr: string,
   keypair: Keypair,
 ): Promise<string> {
-  return withRetry(
-    () => _attemptSubmit(client, preparedXdr, keypair),
-    {
-      maxAttempts: config.TX_MAX_RETRIES,
-      baseDelayMs: config.TX_RETRY_BASE_DELAY_MS,
-      maxDelayMs: config.TX_RETRY_MAX_DELAY_MS,
-      jitter: 0.3,
-      label: "stellar:signAndSubmit",
-    },
-  );
+  return withRetry(() => _attemptSubmit(client, preparedXdr, keypair), {
+    maxAttempts: config.TX_MAX_RETRIES,
+    baseDelayMs: config.TX_RETRY_BASE_DELAY_MS,
+    maxDelayMs: config.TX_RETRY_MAX_DELAY_MS,
+    jitter: 0.3,
+    label: "stellar:signAndSubmit",
+  });
 }
 
 async function _attemptSubmit(
@@ -193,10 +191,7 @@ async function _attemptSubmit(
   let getResult: rpc.Api.GetTransactionResponse;
   let pollAttempts = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const pollIntervalMs = parseInt(
-    process.env.TX_POLL_INTERVAL_MS || (process.env.NODE_ENV === "test" ? "10" : "1500"),
-    10,
-  );
+  const pollIntervalMs = config.POLL_INTERVAL_MS;
 
   try {
     do {
@@ -205,7 +200,8 @@ async function _attemptSubmit(
       });
       timer = undefined;
       getResult = await client.getTransaction(result.hash);
-      if (++pollAttempts > 20) throw new Error("Transaction confirmation timeout");
+      if (++pollAttempts > config.POLL_MAX_ATTEMPTS)
+        throw new Error("Transaction confirmation timeout");
     } while (getResult.status === rpc.Api.GetTransactionStatus.NOT_FOUND);
   } finally {
     if (timer) clearTimeout(timer);
