@@ -9,6 +9,7 @@ import {
 } from "@stellar/stellar-sdk";
 import { withRpcConnection, networkPassphrase, getAdminKeypair, signAndSubmit } from "./stellar";
 import { config } from "../config";
+import { stellarRpcDuration, stellarRpcTotal } from "./prometheus";
 
 if (!config.PROJECT_REGISTRY_CONTRACT_ID) {
   throw new Error("PROJECT_REGISTRY_CONTRACT_ID env var is required");
@@ -55,10 +56,19 @@ export async function getTotalProjects(): Promise<number> {
       .setTimeout(30)
       .build();
 
-    const result = await client.simulateTransaction(tx);
-    if ("error" in result) throw new Error((result as { error: string }).error);
-    const sim = result as rpc.Api.SimulateTransactionSuccessResponse;
-    return Number(scValToNative(sim.result!.retval));
+    const end = stellarRpcDuration.startTimer({ operation: "simulateTransaction" });
+    try {
+      const result = await client.simulateTransaction(tx);
+      if ("error" in result) throw new Error((result as { error: string }).error);
+      const sim = result as rpc.Api.SimulateTransactionSuccessResponse;
+      end();
+      stellarRpcTotal.inc({ operation: "simulateTransaction", result: "success" });
+      return Number(scValToNative(sim.result!.retval));
+    } catch (err) {
+      end();
+      stellarRpcTotal.inc({ operation: "simulateTransaction", result: "failure" });
+      throw err;
+    }
   });
 }
 

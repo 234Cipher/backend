@@ -4,37 +4,18 @@ services:
       context: .
       target: production
     ports:
-      - "3000:3000"
+      - "3001:3001"
     env_file:
       - .env
     environment:
       - NODE_ENV=production
-      - REDIS_URL=redis://redis:6379
-    depends_on:
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./src:/app/src:ro
+      - PORT=3001
+      - ADMIN_SECRET_KEY=${ADMIN_SECRET_KEY}
+      - PROJECT_REGISTRY_CONTRACT_ID=${PROJECT_REGISTRY_CONTRACT_ID}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-
-volumes:
-  redis_data:

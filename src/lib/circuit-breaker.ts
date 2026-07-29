@@ -1,20 +1,10 @@
-/**
- * Circuit breaker for Stellar RPC calls (#56).
- *
- * States:
- *  CLOSED   – normal operation, calls pass through
- *  OPEN     – failure threshold exceeded, calls are rejected immediately (fallback invoked)
- *  HALF_OPEN – recovery probe: one call allowed through to test the RPC
- */
+import { logger } from "./logger";
 
 export type BreakerState = "CLOSED" | "OPEN" | "HALF_OPEN";
 
 export interface CircuitBreakerConfig {
-  /** Number of consecutive failures before opening the circuit. Default: 5 */
   failureThreshold: number;
-  /** How long (ms) to wait in OPEN before moving to HALF_OPEN. Default: 30_000 */
   recoveryTimeoutMs: number;
-  /** Optional name for logging / metrics. */
   name?: string;
 }
 
@@ -91,10 +81,11 @@ export class CircuitBreaker {
   }
 
   private transition(next: BreakerState): void {
-    console.warn(
-      `[${this.config.name}] state: ${this.state} → ${next}` +
-        (next === "OPEN" ? ` (failures: ${this.consecutiveFailures})` : ""),
-    );
+    logger.warn(`[${this.config.name}] circuit state: ${this.state} → ${next}`, {
+      from: this.state,
+      to: next,
+      consecutiveFailures: this.consecutiveFailures,
+    });
     this.state = next;
     this.lastStateChange = Date.now();
   }

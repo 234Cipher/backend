@@ -1,5 +1,15 @@
 import { CircuitBreaker } from "../lib/circuit-breaker";
 
+jest.mock("../lib/logger", () => ({
+  logger: {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    formatError: jest.fn((err: unknown) => ({ error: String(err) })),
+  },
+}));
+
 describe("CircuitBreaker", () => {
   afterEach(() => {
     jest.restoreAllMocks();
@@ -47,6 +57,23 @@ describe("CircuitBreaker", () => {
 
     await expect(breaker.execute(successCall)).resolves.toBe("ok");
     expect(observedState).toBe("HALF_OPEN");
+  });
+
+  it("logs state transitions via the structured logger", async () => {
+    const { logger } = jest.requireMock("../lib/logger") as { logger: { warn: jest.Mock } };
+    const breaker = new CircuitBreaker({ failureThreshold: 1, name: "TestRPC" });
+    const failingCall = jest.fn().mockRejectedValue(new Error("boom"));
+
+    await expect(breaker.execute(failingCall)).rejects.toThrow("boom");
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("TestRPC"),
+      expect.objectContaining({ from: "CLOSED", to: "OPEN" }),
+    );
+  });
+
+  it("uses configurable threshold from CIRCUIT_BREAKER_THRESHOLD env var", () => {
+    const breaker = new CircuitBreaker({ failureThreshold: 10 });
+    expect(breaker.getMetrics().state).toBe("CLOSED");
   });
 
   it("closes the circuit after a successful request", async () => {

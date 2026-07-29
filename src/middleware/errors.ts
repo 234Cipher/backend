@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import { logger } from "../lib/logger";
 
 /**
  * Standard error response shape returned by `errorHandler` and any route that
@@ -103,6 +104,6 @@ export function errorHandler(
     return;
   }
 
-  console.error("[error]", err);
-  res.status(500).json(errorBody("internal_error", "An unexpected error occurred"));
+  logger.error("[error] unhandled error", logger.formatError(err));
+  res.status(500).json(errorBody("INTERNAL_ERROR", "An unexpected error occurred"));
 }
