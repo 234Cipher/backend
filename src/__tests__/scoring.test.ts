@@ -129,3 +129,87 @@ describe("computeScores", () => {
     expect(scores.green_impact).toBe(33);
   });
 });
+
+  // ── Green impact formula edge cases ────────────────────────────────────
+
+  describe("green_impact formula edge cases", () => {
+    it("zero power_output_kw → green_impact based on forest only", () => {
+      // (0/1000)*50 + (60/100)*50 = 0 + 30 = 30
+      const scores = computeScores({
+        solar: { efficiency_pct: 80, power_output_kw: 0, max_power_kw: 1000 },
+        satellite: { forest_density_pct: 60, ndvi_score: 0.6 },
+      });
+      expect(scores.green_impact).toBe(30);
+    });
+
+    it("zero max_power_kw → handled gracefully (not NaN)", () => {
+      // maxPower > 0 is false → powerRatio = 0 → (0)*50 + (50/100)*50 = 25
+      const scores = computeScores({
+        solar: { efficiency_pct: 50, power_output_kw: 100, max_power_kw: 0 },
+        satellite: { forest_density_pct: 50, ndvi_score: 0.5 },
+      });
+      expect(scores.green_impact).toBe(25);
+      expect(Number.isNaN(scores.green_impact)).toBe(false);
+    });
+
+    it("zero forest_density_pct → green_impact based on power only", () => {
+      // (500/1000)*50 + (0/100)*50 = 25 + 0 = 25
+      const scores = computeScores({
+        solar: { efficiency_pct: 50, power_output_kw: 500, max_power_kw: 1000 },
+        satellite: { forest_density_pct: 0, ndvi_score: 0 },
+      });
+      expect(scores.green_impact).toBe(25);
+    });
+
+    it("both power_output_kw and forest_density_pct zero → green_impact = 0", () => {
+      // (0/1000)*50 + (0/100)*50 = 0
+      const scores = computeScores({
+        solar: { efficiency_pct: 50, power_output_kw: 0, max_power_kw: 1000 },
+        satellite: { forest_density_pct: 0, ndvi_score: 0 },
+      });
+      expect(scores.green_impact).toBe(0);
+    });
+  });
+
+  // ── Rounding behavior ──────────────────────────────────────────────────
+
+  describe("Math.round() rounding behavior at .5 boundaries", () => {
+    /**
+     * JavaScript's Math.round rounds .5 up (away from zero).
+     * For green_impact, Math.round(value) is used where value is a number
+     * computed from powerRatio * 50 + (forestDensity / 100) * 50.
+     * This means 70.5 → 71, 70.4 → 70, 70.6 → 71.
+     */
+
+    it("value at exactly .5 boundary rounds up (e.g. 70.5 → 71)", () => {
+      // Solve for inputs that give 70.5 before rounding:
+      // (powerRatio)*50 + (forestDensity/100)*50 = 70.5
+      // Using powerRatio = 0.5 (500/1000) → 25 from power
+      // Need 45.5 from forest → forestDensity = 91
+      // 25 + 45.5 = 70.5 → Math.round(70.5) = 71
+      const scores = computeScores({
+        solar: { efficiency_pct: 50, power_output_kw: 500, max_power_kw: 1000 },
+        satellite: { forest_density_pct: 91, ndvi_score: 0.91 },
+      });
+      expect(scores.green_impact).toBe(71);
+    });
+
+    it("value below .5 rounds down (e.g. 70.4 → 70)", () => {
+      // (500/1000)*50 + (40.8/100)*50 = 25 + 20.4 = 45.4 → Math.round(45.4) = 45
+      const scores = computeScores({
+        solar: { efficiency_pct: 50, power_output_kw: 500, max_power_kw: 1000 },
+        satellite: { forest_density_pct: 40.8, ndvi_score: 0.408 },
+      });
+      expect(scores.green_impact).toBe(45);
+    });
+
+    it("value above .5 rounds up (e.g. 70.6 → 71)", () => {
+      // (500/1000)*50 + (41.2/100)*50 = 25 + 20.6 = 45.6 → Math.round(45.6) = 46
+      const scores = computeScores({
+        solar: { efficiency_pct: 50, power_output_kw: 500, max_power_kw: 1000 },
+        satellite: { forest_density_pct: 41.2, ndvi_score: 0.412 },
+      });
+      expect(scores.green_impact).toBe(46);
+    });
+  });
+});

@@ -1,4 +1,5 @@
 import { computeScores, type IotInput } from "../lib/scoring";
+import { getSolarData, getSatelliteData } from "../routes/iot";
 
 function measureMs(fn: () => void): number {
   const start = performance.now();
@@ -69,6 +70,61 @@ describe("performance benchmarks", () => {
       });
       const opsPerSec = (iterations / ms) * 1000;
       expect(opsPerSec).toBeGreaterThan(20_000);
+    });
+  });
+
+  // ── IoT endpoint performance ───────────────────────────────────────────
+
+  describe("IoT data endpoint speed", () => {
+    it("getSolarData completes under 1ms for single request", () => {
+      const ms = measureMs(() => {
+        for (let i = 0; i < 1000; i++) {
+          getSolarData(i);
+        }
+      });
+      // 1000 calls should be well under 1000ms
+      expect(ms).toBeLessThan(1000);
+    });
+
+    it("getSatelliteData completes under 1ms for single request", () => {
+      const ms = measureMs(() => {
+        for (let i = 0; i < 1000; i++) {
+          getSatelliteData(i);
+        }
+      });
+      expect(ms).toBeLessThan(1000);
+    });
+
+    it("single getSolarData request response time < 100ms", () => {
+      const ms = measureMs(() => {
+        getSolarData(42);
+      });
+      expect(ms).toBeLessThan(100);
+    });
+
+    it("single getSatelliteData request response time < 100ms", () => {
+      const ms = measureMs(() => {
+        getSatelliteData(42);
+      });
+      expect(ms).toBeLessThan(100);
+    });
+
+    it("concurrent (10) getSolarData requests complete within 1s", () => {
+      const start = performance.now();
+      for (let i = 0; i < 10; i++) {
+        getSolarData(i);
+      }
+      const ms = performance.now() - start;
+      expect(ms).toBeLessThan(1000);
+    });
+
+    it("concurrent (10) getSatelliteData requests complete within 1s", () => {
+      const start = performance.now();
+      for (let i = 0; i < 10; i++) {
+        getSatelliteData(i);
+      }
+      const ms = performance.now() - start;
+      expect(ms).toBeLessThan(1000);
     });
   });
 });
