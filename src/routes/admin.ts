@@ -1,19 +1,26 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { getSolarData, getSatelliteData } from "./iot";
-import { computeScores } from "../lib/scoring";
-import { updateImpactScore, getTotalProjects } from "../lib/registry";
-import { badRequest, parseOptionalInt } from "../middleware/errors";
+import { updateScoreForProject } from "../lib/scoreService";
+import { getTotalProjects } from "../lib/registry";
+import { badRequest, parseOptionalInt, errorBody } from "../middleware/errors";
 import { recordAudit, getAuditLog, auditToCsv } from "../lib/audit";
 import { broadcastScoreUpdate } from "../lib/websocket";
+import { tryBeginUpdate, markCompleted, markFailed } from "../lib/duplicate-detection";
+import { withProjectLock } from "../lib/request-queue";
+import { config } from "../config";
+import { logger } from "../lib/logger";
 
 const router = Router();
 
 // Bearer token auth — enforced when ADMIN_API_KEY env var is set
 router.use((req: Request, res: Response, next: NextFunction) => {
-  const apiKey = process.env.ADMIN_API_KEY;
-  if (!apiKey) return next();
+  const apiKey = config.ADMIN_API_KEY;
+  if (!apiKey) {
+    return res
+      .status(500)
+      .json(errorBody("server_misconfigured", "Admin API key is not configured"));
+  }
   if (req.headers.authorization !== `Bearer ${apiKey}`) {
-    return res.status(401).json({ error: "unauthorized", message: "Missing or invalid bearer token" });
+    return res.status(401).json(errorBody("unauthorized", "Missing or invalid bearer token"));
   }
   next();
 });
@@ -38,12 +45,16 @@ function parseProjectIds(body: unknown): number[] | null {
 
 // POST /api/admin/update-scores
 // Body: { project_ids?: number[] }  — defaults to all projects
-// Returns: { updated: number, results: [...], errors: [...] }
-router.post("/update-scores", async (req: Request, res: Response) => {
-  // Validation throws ApiError -> handled by the central error middleware as 400.
-  const requested = parseProjectIds(req.body);
-
+// Returns: { updated: number, results: [...], errors: [...], skipped: [...] }
+//
+// All errors — including validation (400) and unexpected failures (500) — are
+// forwarded to the central errorHandler via next() so status codes stay consistent
+// across all endpoints. The nested per-project catch is intentional: it collects
+// partial failures without aborting the entire batch.
+router.post("/update-scores", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const requested = parseProjectIds(req.body);
+
     let projectIds: number[];
 
     if (requested) {
@@ -59,40 +70,96 @@ router.post("/update-scores", async (req: Request, res: Response) => {
       credit_quality: number;
       green_impact: number;
     }> = [];
-    const errors: Array<{ project_id: number; error: string }> = [];
+    const errors: Array<{ project_id: number; error: { code: string; message: string } }> = [];
+    const skipped: Array<{ project_id: number; reason: string }> = [];
 
-    // Soroban does not support multi-call batching — submit sequentially
+    // Soroban does not support multi-call batching — submit sequentially.
+    // Each project is individually isolated: a failure on one does not abort
+    // the rest. Accumulated errors are returned alongside successes so callers
+    // can retry only the affected ids.
     for (const projectId of projectIds) {
       try {
-        const solar = getSolarData(projectId);
-        const satellite = getSatelliteData(projectId);
-        const scores = computeScores({ solar, satellite });
-        const tx_hash = await updateImpactScore(projectId, scores.credit_quality, scores.green_impact);
-        results.push({ project_id: projectId, tx_hash, ...scores });
-        recordAudit({
-          project_id: projectId,
-          credit_quality: scores.credit_quality,
-          green_impact: scores.green_impact,
-          tx_hash,
-          triggered_by: "api",
+        const result = await withProjectLock(projectId, async () => {
+          const { allowed, reason } = tryBeginUpdate(projectId);
+          if (!allowed) {
+            return { skipped: true, reason: reason! };
+          }
+          try {
+            const scoreResult = await updateScoreForProject(projectId);
+
+            if (scoreResult.status === "deferred") {
+              logger.warn(`[oracle] project ${projectId}: RPC degraded, score queued for later`);
+              markCompleted(projectId);
+              return {
+                project_id: projectId,
+                tx_hash: "deferred",
+                credit_quality: scoreResult.creditQuality,
+                green_impact: scoreResult.greenImpact,
+              };
+            }
+
+            if (scoreResult.status === "error") {
+              throw new Error(scoreResult.error);
+            }
+
+            markCompleted(projectId);
+            recordAudit({
+              project_id: projectId,
+              credit_quality: scoreResult.creditQuality,
+              green_impact: scoreResult.greenImpact,
+              tx_hash: scoreResult.txHash,
+              triggered_by: "api",
+            });
+            broadcastScoreUpdate({
+              project_id: projectId,
+              credit_quality: scoreResult.creditQuality,
+              green_impact: scoreResult.greenImpact,
+              timestamp: Date.now(),
+            });
+            logger.info(
+              `[oracle] project ${projectId}: cq=${scoreResult.creditQuality} gi=${scoreResult.greenImpact} tx=${scoreResult.txHash}`,
+            );
+            return {
+              project_id: projectId,
+              tx_hash: scoreResult.txHash,
+              credit_quality: scoreResult.creditQuality,
+              green_impact: scoreResult.greenImpact,
+            };
+          } catch (err) {
+            markFailed(projectId);
+            throw err;
+          }
         });
-        broadcastScoreUpdate({
-          project_id: projectId,
-          credit_quality: scores.credit_quality,
-          green_impact: scores.green_impact,
-          timestamp: Date.now(),
-        });
-        console.log(`[oracle] project ${projectId}: cq=${scores.credit_quality} gi=${scores.green_impact} tx=${tx_hash}`);
+
+        if (result.skipped) {
+          skipped.push({ project_id: projectId, reason: result.reason });
+          logger.info(`[oracle] skipping project ${projectId}: ${result.reason}`);
+        } else {
+          const r = result as {
+            project_id: number;
+            tx_hash: string;
+            credit_quality: number;
+            green_impact: number;
+          };
+          results.push(r);
+        }
       } catch (err) {
-        console.error(`[oracle] project ${projectId} failed:`, err);
-        errors.push({ project_id: projectId, error: String(err) });
+        logger.error(`[oracle] project ${projectId} failed`, logger.formatError(err));
+        errors.push({
+          project_id: projectId,
+          error: {
+            code: "update_failed",
+            message: (err as Error)?.message || String(err),
+          },
+        });
       }
     }
 
-    res.json({ updated: results.length, results, errors });
+    res.json({ updated: results.length, results, errors, skipped });
   } catch (error) {
-    console.error("[oracle] failed:", error);
-    res.status(500).json({ error: "internal_error", message: "Failed to update scores" });
+    // Forward to errorHandler: ApiError → its .status (e.g. 400 for bad input),
+    // SyntaxError → 400, anything else → 500.
+    next(error);
   }
 });
 
@@ -103,7 +170,8 @@ router.post("/update-scores", async (req: Request, res: Response) => {
  */
 router.get("/audit", (req: Request, res: Response, next: NextFunction) => {
   try {
-    const project_id = parseOptionalInt(req.query.project_id as string | undefined, "project_id", 0) || undefined;
+    const project_id =
+      parseOptionalInt(req.query.project_id as string | undefined, "project_id", 0) || undefined;
     const from = parseOptionalInt(req.query.from as string | undefined, "from", 0) || undefined;
     const to = parseOptionalInt(req.query.to as string | undefined, "to", 0) || undefined;
 
@@ -116,7 +184,7 @@ router.get("/audit", (req: Request, res: Response, next: NextFunction) => {
 
     if (format === "csv") {
       res.set("Content-Type", "text/csv");
-      res.set("Content-Disposition", "attachment; filename=\"audit-log.csv\"");
+      res.set("Content-Disposition", 'attachment; filename="audit-log.csv"');
       res.send(auditToCsv(entries));
       return;
     }
