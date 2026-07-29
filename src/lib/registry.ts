@@ -34,7 +34,7 @@ export async function updateImpactScore(
           nativeToScVal(greenImpact, { type: "u32" }),
         ),
       )
-      .setTimeout(30)
+      .setTimeout(config.TX_TIMEOUT_SECONDS)
       .build();
 
     const prepared = await client.prepareTransaction(tx);
@@ -63,7 +63,7 @@ export async function getTotalProjects(): Promise<number> {
 
     const tx = new TransactionBuilder(dummyAccount, { fee: BASE_FEE, networkPassphrase })
       .addOperation(contract.call("total_projects"))
-      .setTimeout(30)
+      .setTimeout(config.TX_TIMEOUT_SECONDS)
       .build();
 
     const sim = await client.simulateTransaction(tx);

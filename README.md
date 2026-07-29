@@ -220,6 +220,10 @@ Create a `.env` file (see `.env.example`):
 | `RATE_LIMIT_MAX` | No | `100` | Public max requests per IP per window |
 | `RATE_LIMIT_ADMIN_WINDOW_MS` | No | `RATE_LIMIT_WINDOW_MS` | Admin rate-limit window (ms) |
 | `RATE_LIMIT_ADMIN_MAX` | No | `20` | Admin max requests per IP per window |
+| `POLL_INTERVAL_MS` | No | `1500` | Stellar transaction confirmation polling interval (ms) |
+| `POLL_MAX_ATTEMPTS` | No | `20` | Max polling attempts before timing out |
+| `TX_TIMEOUT_SECONDS` | No | `30` | Soroban transaction timeout (seconds) |
+| `MAX_POWER_KW` | No | `1000` | Maximum simulated solar power output (kW) |
 
 ---
 

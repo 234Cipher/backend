@@ -98,6 +98,16 @@ export const config = {
   TX_RETRY_BASE_DELAY_MS: numEnv("TX_RETRY_BASE_DELAY_MS", 200),
   TX_RETRY_MAX_DELAY_MS: numEnv("TX_RETRY_MAX_DELAY_MS", 10000),
 
+  /** Stellar transaction polling */
+  POLL_INTERVAL_MS: numEnv("POLL_INTERVAL_MS", 1500),
+  POLL_MAX_ATTEMPTS: numEnv("POLL_MAX_ATTEMPTS", 20),
+
+  /** Stellar transaction timeout (seconds) */
+  TX_TIMEOUT_SECONDS: numEnv("TX_TIMEOUT_SECONDS", 30),
+
+  /** IoT max power output (kW) */
+  MAX_POWER_KW: numEnv("MAX_POWER_KW", 1000),
+
   /** Cron */
   CRON_TIMEZONE: optionalEnv("CRON_TIMEZONE", "UTC"),
   CRON_FAILURE_THRESHOLD: floatEnv("CRON_FAILURE_THRESHOLD", 0.5),
