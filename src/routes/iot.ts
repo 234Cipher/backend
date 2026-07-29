@@ -3,7 +3,7 @@ import { parseProjectId } from "../middleware/errors";
 
 const MAX_POWER_KW = 1000;
 
-function seededRandom(seed: number): number {
+export function seededRandom(seed: number): number {
   const hourSeed = Math.floor(Date.now() / 3_600_000);
   const x = Math.sin(seed * 9301 + hourSeed * 49297 + 233) * 10000;
   return x - Math.floor(x);
