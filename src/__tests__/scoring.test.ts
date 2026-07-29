@@ -1,4 +1,11 @@
-import { computeScores } from "../lib/scoring";
+import {
+  computeScores,
+  GREEN_IMPACT_FOREST_WEIGHT,
+  GREEN_IMPACT_POWER_WEIGHT,
+  PERCENT_MAX,
+  SCORE_MAX,
+  SCORE_MIN,
+} from "../lib/scoring";
 
 describe("computeScores", () => {
   it("perfect data → 100/100", () => {
@@ -128,7 +135,6 @@ describe("computeScores", () => {
     expect(scores.credit_quality).toBe(34);
     expect(scores.green_impact).toBe(33);
   });
-});
 
   // ── Green impact formula edge cases ────────────────────────────────────
 
@@ -210,6 +216,71 @@ describe("computeScores", () => {
         satellite: { forest_density_pct: 41.2, ndvi_score: 0.412 },
       });
       expect(scores.green_impact).toBe(46);
+    });
+  });
+
+  // ── Named constants ────────────────────────────────────────────────────
+
+  describe("scoring constants", () => {
+    it("green_impact weights sum to SCORE_MAX", () => {
+      expect(GREEN_IMPACT_POWER_WEIGHT + GREEN_IMPACT_FOREST_WEIGHT).toBe(SCORE_MAX);
+    });
+
+    it("formula matches the named constants", () => {
+      const power_output_kw = 800;
+      const max_power_kw = 1000;
+      const forest_density_pct = 60;
+      const expected = Math.round(
+        (power_output_kw / max_power_kw) * GREEN_IMPACT_POWER_WEIGHT +
+          (forest_density_pct / PERCENT_MAX) * GREEN_IMPACT_FOREST_WEIGHT,
+      );
+      const scores = computeScores({
+        solar: { efficiency_pct: 80, power_output_kw, max_power_kw },
+        satellite: { forest_density_pct, ndvi_score: 0.6 },
+      });
+      expect(scores.green_impact).toBe(expected);
+      expect(scores.green_impact).toBeGreaterThanOrEqual(SCORE_MIN);
+      expect(scores.green_impact).toBeLessThanOrEqual(SCORE_MAX);
+    });
+  });
+
+  // ── Timestamps ─────────────────────────────────────────────────────────
+
+  describe("reading timestamps", () => {
+    it("accepts timestamps on solar and satellite readings", () => {
+      const scores = computeScores({
+        solar: {
+          efficiency_pct: 80,
+          power_output_kw: 800,
+          max_power_kw: 1000,
+          timestamp: 1_700_000_000_000,
+        },
+        satellite: { forest_density_pct: 60, ndvi_score: 0.6, timestamp: 1_700_000_000_000 },
+      });
+      expect(scores.credit_quality).toBe(80);
+      expect(scores.green_impact).toBe(70);
+    });
+
+    it("ignores timestamps: stale and fresh readings score identically", () => {
+      const solar = { efficiency_pct: 80, power_output_kw: 800, max_power_kw: 1000 };
+      const satellite = { forest_density_pct: 60, ndvi_score: 0.6 };
+      const stale = computeScores({
+        solar: { ...solar, timestamp: 0 },
+        satellite: { ...satellite, timestamp: 0 },
+      });
+      const fresh = computeScores({
+        solar: { ...solar, timestamp: 1_900_000_000_000 },
+        satellite: { ...satellite, timestamp: 1_900_000_000_000 },
+      });
+      expect(stale).toEqual(fresh);
+    });
+
+    it("timestamps remain optional (existing callers unaffected)", () => {
+      const scores = computeScores({
+        solar: { efficiency_pct: 80, power_output_kw: 800, max_power_kw: 1000 },
+        satellite: { forest_density_pct: 60, ndvi_score: 0.6 },
+      });
+      expect(scores.green_impact).toBe(70);
     });
   });
 });
