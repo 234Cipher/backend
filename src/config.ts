@@ -45,9 +45,34 @@ function validateEnvValue(name: string, value: string, allowedValues?: readonly 
   }
 }
 
+/** The Stellar networks this service knows how to talk to. */
+export type StellarNetwork = "testnet" | "mainnet";
+
+export const STELLAR_NETWORKS: readonly StellarNetwork[] = ["testnet", "mainnet"];
+
+/**
+ * Narrowing guard for STELLAR_NETWORK. Written as explicit comparisons so the
+ * check is a real runtime validation and TypeScript can derive the narrowed
+ * type without an assertion.
+ */
+export function isStellarNetwork(value: string): value is StellarNetwork {
+  return value === "testnet" || value === "mainnet";
+}
+
+/**
+ * Read a network-valued env var. An unset or unrecognised value falls back to
+ * `fallback` so importing this module never throws. `validateRequiredEnv` is
+ * what turns a misconfigured value into a startup error.
+ */
+function networkEnv(name: string, fallback: StellarNetwork): StellarNetwork {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  return isStellarNetwork(raw) ? raw : fallback;
+}
+
 export const config = {
   /** Stellar / Soroban */
-  STELLAR_NETWORK: optionalEnv("STELLAR_NETWORK", "testnet") as "testnet" | "mainnet",
+  STELLAR_NETWORK: networkEnv("STELLAR_NETWORK", "testnet"),
   ADMIN_SECRET_KEY: process.env.ADMIN_SECRET_KEY || "",
   PROJECT_REGISTRY_CONTRACT_ID: process.env.PROJECT_REGISTRY_CONTRACT_ID || "",
   RPC_URL: optionalEnv("RPC_URL", "https://soroban-testnet.stellar.org"),
@@ -111,6 +136,12 @@ export const config = {
 } as const;
 
 /**
+ * The shape of the resolved application configuration. Exported so consumers
+ * and tests can reference the config type without re-deriving it inline.
+ */
+export type AppConfig = typeof config;
+
+/**
  * Validate required environment variables at startup.
  * Call this once during server bootstrap before any routes or cron jobs.
  * Throws a clear error if any required variable is missing.
@@ -118,7 +149,10 @@ export const config = {
 export function validateRequiredEnv(): void {
   requireEnv("ADMIN_SECRET_KEY");
   requireEnv("PROJECT_REGISTRY_CONTRACT_ID");
-  validateEnvValue("STELLAR_NETWORK", config.STELLAR_NETWORK, ["testnet", "mainnet"]);
+  // Read the raw value rather than config.STELLAR_NETWORK: the config object is
+  // built once at import time and coerces unknown values to the default, so
+  // validating it would never see a bad value.
+  validateEnvValue("STELLAR_NETWORK", process.env.STELLAR_NETWORK || "", STELLAR_NETWORKS);
 }
 
 /**

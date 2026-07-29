@@ -16,6 +16,12 @@ FROM node:22-alpine AS production
 
 ENV NODE_ENV=production
 
+# Cap the V8 old-space heap below the 512MB container memory limit (#225).
+# The headroom covers the Node binary, native buffers and the RPC client, so a
+# runaway polling loop hits an OOM inside Node — with a JS stack trace — rather
+# than being SIGKILLed by the kernel with no diagnostics.
+ENV NODE_OPTIONS="--max-old-space-size=384"
+
 WORKDIR /app
 
 COPY package*.json ./
