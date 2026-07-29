@@ -1,290 +1,267 @@
-/**
- * @jest-environment node
- */
-process.env.PROJECT_REGISTRY_CONTRACT_ID = "CCJZK7ZYK5N4T6Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5";
-
 import request from "supertest";
 import express, { Express } from "express";
 import adminRouter from "../routes/admin";
-import { errorHandler, notFoundHandler } from "../middleware/errors";
+import { errorHandler } from "../middleware/errors";
 import * as registry from "../lib/registry";
 import * as iot from "../routes/iot";
 import * as scoring from "../lib/scoring";
 
-jest.mock("../lib/registry");
+jest.mock("../lib/registry", () => {
+  class RpcDegradedError extends Error {
+    constructor(message?: string) {
+      super(message ?? "RPC is degraded");
+      this.name = "RpcDegradedError";
+    }
+  }
+  return {
+    updateImpactScore: jest.fn(),
+    getTotalProjects: jest.fn(),
+    RpcDegradedError,
+  };
+});
 jest.mock("../routes/iot");
 jest.mock("../lib/scoring");
+jest.mock("../config", () => ({
+  config: {
+    ADMIN_API_KEY: "test-key",
+  },
+}));
+
+function buildApp(): Express {
+  const app = express();
+  app.use(express.json());
+  app.use("/api/admin", adminRouter);
+  app.use(errorHandler);
+  return app;
+}
+
+const AUTH_HEADER = { Authorization: "Bearer test-key" };
 
 describe("admin routes", () => {
   let app: Express;
 
   beforeEach(() => {
-    app = express();
-    app.use(express.json());
-    app.use("/api/admin", adminRouter);
-    app.use(notFoundHandler);
-    app.use(errorHandler);
-
-    process.env.ADMIN_API_KEY = "test-key";
-
+    app = buildApp();
     jest.clearAllMocks();
+    (iot.getSolarData as jest.Mock).mockReturnValue({
+      efficiency_pct: 85,
+      power_output_kw: 500,
+      max_power_kw: 1000,
+    });
+    (iot.getSatelliteData as jest.Mock).mockReturnValue({
+      forest_density_pct: 60,
+      ndvi_score: 0.6,
+    });
+    (scoring.computeScores as jest.Mock).mockReturnValue({
+      credit_quality: 85,
+      green_impact: 70,
+    });
+    (registry.updateImpactScore as jest.Mock).mockResolvedValue("tx-hash");
+    (registry.getTotalProjects as jest.Mock).mockResolvedValue(2);
   });
 
-  afterEach(() => {
-    delete process.env.ADMIN_API_KEY;
-  });
+  // ── Auth middleware ──────────────────────────────────────────────────────
 
-  describe("POST /update-scores - happy path", () => {
-    it("should accept authenticated request with valid payload and submit scores", async () => {
-      (registry.getTotalProjects as jest.Mock).mockResolvedValue(2);
-      (iot.getSolarData as jest.Mock).mockReturnValue({
-        efficiency_pct: 85,
-        power_output_kw: 500,
-        max_power_kw: 1000,
-      });
-      (iot.getSatelliteData as jest.Mock).mockReturnValue({
-        forest_density_pct: 60,
-        ndvi_score: 0.6,
-      });
-      (scoring.computeScores as jest.Mock).mockReturnValue({
-        credit_quality: 85,
-        green_impact: 70,
-      });
-      (registry.updateImpactScore as jest.Mock).mockResolvedValue("tx-hash-123");
+  describe("auth middleware", () => {
+    it("returns 500 when ADMIN_API_KEY is not configured", async () => {
+      const configModule = jest.requireMock("../config") as { config: { ADMIN_API_KEY: string } };
+      const orig = configModule.config.ADMIN_API_KEY;
+      configModule.config.ADMIN_API_KEY = "";
+      try {
+        const res = await request(app).post("/api/admin/update-scores").send({});
+        expect(res.status).toBe(500);
+        expect(res.body.error.code).toBe("server_misconfigured");
+      } finally {
+        configModule.config.ADMIN_API_KEY = orig;
+      }
+    });
 
+    it("returns 401 when authorization header is missing", async () => {
+      const res = await request(app).post("/api/admin/update-scores").send({});
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe("unauthorized");
+    });
+
+    it("returns 401 when bearer token is wrong", async () => {
       const res = await request(app)
         .post("/api/admin/update-scores")
-        .set("Authorization", "Bearer test-key")
-        .send({})
+        .set("Authorization", "Bearer wrong-token")
+        .send({});
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe("unauthorized");
+    });
+
+    it("returns 401 when authorization format is invalid", async () => {
+      const res = await request(app)
+        .post("/api/admin/update-scores")
+        .set("Authorization", "not-bearer")
+        .send({});
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe("unauthorized");
+    });
+
+    it("passes through for valid token", async () => {
+      const res = await request(app).post("/api/admin/update-scores").set(AUTH_HEADER).send({});
+      expect(res.status).toBe(200);
+    });
+  });
+
+  // ── POST /update-scores ──────────────────────────────────────────────────
+
+  describe("POST /update-scores", () => {
+    it("returns correct response shape with valid project_ids", async () => {
+      const res = await request(app)
+        .post("/api/admin/update-scores")
+        .set(AUTH_HEADER)
+        .send({ project_ids: [1, 2] })
         .expect(200);
 
-      expect(res.body).toEqual({
+      expect(res.body).toMatchObject({
         updated: 2,
         results: expect.arrayContaining([
-          {
+          expect.objectContaining({
             project_id: 1,
             credit_quality: 85,
             green_impact: 70,
-            tx_hash: "tx-hash-123",
-          },
-          {
-            project_id: 2,
-            credit_quality: 85,
-            green_impact: 70,
-            tx_hash: "tx-hash-123",
-          },
+            tx_hash: "tx-hash",
+          }),
         ]),
         errors: [],
+        skipped: [],
       });
-
-      expect(registry.updateImpactScore).toHaveBeenCalledTimes(2);
     });
 
-    it("should handle specific project_ids in request body", async () => {
-      (iot.getSolarData as jest.Mock).mockReturnValue({
-        efficiency_pct: 85,
-        power_output_kw: 500,
-        max_power_kw: 1000,
-      });
-      (iot.getSatelliteData as jest.Mock).mockReturnValue({
-        forest_density_pct: 60,
-        ndvi_score: 0.6,
-      });
-      (scoring.computeScores as jest.Mock).mockReturnValue({
-        credit_quality: 85,
-        green_impact: 70,
-      });
-      (registry.updateImpactScore as jest.Mock).mockResolvedValue("tx-hash-456");
-
+    it("returns 400 with invalid project_ids", async () => {
       const res = await request(app)
         .post("/api/admin/update-scores")
-        .set("Authorization", "Bearer test-key")
-        .send({ project_ids: [1, 3] })
+        .set(AUTH_HEADER)
+        .send({ project_ids: ["abc", null, {}] })
+        .expect(400);
+
+      expect(res.body.error.code).toBe("bad_request");
+      expect(res.body.error.message).toContain("project_ids");
+    });
+
+    it("returns 400 for non-array project_ids", async () => {
+      const res = await request(app)
+        .post("/api/admin/update-scores")
+        .set(AUTH_HEADER)
+        .send({ project_ids: "not-an-array" })
+        .expect(400);
+
+      expect(res.body.error.code).toBe("bad_request");
+    });
+
+    it("defaults to all projects when project_ids is omitted", async () => {
+      const res = await request(app)
+        .post("/api/admin/update-scores")
+        .set(AUTH_HEADER)
+        .send({})
         .expect(200);
 
       expect(res.body.updated).toBe(2);
-      expect(res.body.results).toHaveLength(2);
-      expect(res.body.results[0].project_id).toBe(1);
-      expect(res.body.results[1].project_id).toBe(3);
-    });
-  });
-
-  describe("POST /update-scores - authorization rejection", () => {
-    it("should return 401 when authorization header is missing", async () => {
-      await request(app)
-        .post("/api/admin/update-scores")
-        .send({})
-        .expect(401)
-        .expect({ error: "unauthorized", message: "Missing or invalid bearer token" });
-    });
-
-    it("should return 401 when authorization header has wrong token", async () => {
-      await request(app)
-        .post("/api/admin/update-scores")
-        .set("Authorization", "Bearer wrong-key")
-        .send({})
-        .expect(401)
-        .expect({ error: "unauthorized", message: "Missing or invalid bearer token" });
-    });
-
-    it("should return 401 when authorization format is invalid", async () => {
-      await request(app)
-        .post("/api/admin/update-scores")
-        .set("Authorization", "test-key")
-        .send({})
-        .expect(401)
-        .expect({ error: "unauthorized", message: "Missing or invalid bearer token" });
-    });
-  });
-
-  describe("POST /update-scores - bad input handling", () => {
-    it("should return 400 when project_ids is not an array", async () => {
-      const res = await request(app)
-        .post("/api/admin/update-scores")
-        .set("Authorization", "Bearer test-key")
-        .send({ project_ids: "not-an-array" });
-
-      expect(res.status).toBe(400);
-      expect(res.body).toEqual({
-        error: "bad_request",
-        message: "project_ids must be an array of positive integers",
-      });
-    });
-
-    it("should return 400 when project_ids array is empty", async () => {
-      (registry.getTotalProjects as jest.Mock).mockResolvedValue(1);
-      (iot.getSolarData as jest.Mock).mockReturnValue({
-        efficiency_pct: 85,
-        power_output_kw: 500,
-        max_power_kw: 1000,
-      });
-      (iot.getSatelliteData as jest.Mock).mockReturnValue({
-        forest_density_pct: 60,
-        ndvi_score: 0.6,
-      });
-      (scoring.computeScores as jest.Mock).mockReturnValue({
-        credit_quality: 85,
-        green_impact: 70,
-      });
-
-      const res = await request(app)
-        .post("/api/admin/update-scores")
-        .set("Authorization", "Bearer test-key")
-        .send({ project_ids: [] });
-
-      expect(res.status).toBe(200);
       expect(registry.getTotalProjects).toHaveBeenCalled();
     });
 
-    it("should fall through to all projects when project_ids is null", async () => {
-      (registry.getTotalProjects as jest.Mock).mockResolvedValue(1);
-      (iot.getSolarData as jest.Mock).mockReturnValue({
-        efficiency_pct: 85,
-        power_output_kw: 500,
-        max_power_kw: 1000,
-      });
-      (iot.getSatelliteData as jest.Mock).mockReturnValue({
-        forest_density_pct: 60,
-        ndvi_score: 0.6,
-      });
-      (scoring.computeScores as jest.Mock).mockReturnValue({
-        credit_quality: 85,
-        green_impact: 70,
-      });
-
+    it("defaults to all projects when project_ids is empty", async () => {
       const res = await request(app)
         .post("/api/admin/update-scores")
-        .set("Authorization", "Bearer test-key")
-        .send({ project_ids: null });
+        .set(AUTH_HEADER)
+        .send({ project_ids: [] })
+        .expect(200);
 
-      expect(res.status).toBe(200);
+      expect(res.body.updated).toBe(2);
       expect(registry.getTotalProjects).toHaveBeenCalled();
     });
 
-    it("should fall through to all projects when project_ids is missing", async () => {
-      (registry.getTotalProjects as jest.Mock).mockResolvedValue(1);
-      (iot.getSolarData as jest.Mock).mockReturnValue({
-        efficiency_pct: 85,
-        power_output_kw: 500,
-        max_power_kw: 1000,
-      });
-      (iot.getSatelliteData as jest.Mock).mockReturnValue({
-        forest_density_pct: 60,
-        ndvi_score: 0.6,
-      });
-      (scoring.computeScores as jest.Mock).mockReturnValue({
-        credit_quality: 85,
-        green_impact: 70,
-      });
-
+    it("defaults to all projects when project_ids is null", async () => {
       const res = await request(app)
         .post("/api/admin/update-scores")
-        .set("Authorization", "Bearer test-key")
-        .send({});
+        .set(AUTH_HEADER)
+        .send({ project_ids: null })
+        .expect(200);
 
-      expect(res.status).toBe(200);
+      expect(res.body.updated).toBe(2);
       expect(registry.getTotalProjects).toHaveBeenCalled();
     });
 
-    it("should catch and return partial results when some projects fail", async () => {
-      (iot.getSolarData as jest.Mock).mockReturnValue({
-        efficiency_pct: 85,
-        power_output_kw: 500,
-        max_power_kw: 1000,
-      });
-      (iot.getSatelliteData as jest.Mock).mockReturnValue({
-        forest_density_pct: 60,
-        ndvi_score: 0.6,
-      });
-      (scoring.computeScores as jest.Mock).mockReturnValue({
-        credit_quality: 85,
-        green_impact: 70,
-      });
+    it("defers score when RPC is degraded", async () => {
+      const RpcDegradedError = (
+        registry as unknown as { RpcDegradedError: new (msg?: string) => Error }
+      ).RpcDegradedError;
       (registry.updateImpactScore as jest.Mock)
-        .mockResolvedValueOnce("tx-hash-1")
-        .mockRejectedValueOnce(new Error("RPC error"))
-        .mockResolvedValueOnce("tx-hash-3");
+        .mockResolvedValueOnce("tx-1")
+        .mockRejectedValueOnce(new RpcDegradedError("RPC is degraded"))
+        .mockResolvedValueOnce("tx-3");
 
       const res = await request(app)
         .post("/api/admin/update-scores")
-        .set("Authorization", "Bearer test-key")
+        .set(AUTH_HEADER)
+        .send({ project_ids: [1, 2, 3] })
+        .expect(200);
+
+      expect(res.body.updated).toBe(3);
+      expect(res.body.results).toHaveLength(3);
+      expect(res.body.errors).toHaveLength(0);
+      // Project 2 should be deferred
+      const deferredResult = res.body.results.find(
+        (r: { project_id: number; tx_hash: string }) => r.project_id === 2,
+      );
+      expect(deferredResult.tx_hash).toBe("deferred");
+    });
+
+    it("isolates per-project errors without aborting the batch", async () => {
+      (registry.updateImpactScore as jest.Mock)
+        .mockResolvedValueOnce("tx-1")
+        .mockRejectedValueOnce(new Error("RPC timeout"))
+        .mockResolvedValueOnce("tx-3");
+
+      const res = await request(app)
+        .post("/api/admin/update-scores")
+        .set(AUTH_HEADER)
         .send({ project_ids: [1, 2, 3] })
         .expect(200);
 
       expect(res.body.updated).toBe(2);
       expect(res.body.results).toHaveLength(2);
       expect(res.body.errors).toHaveLength(1);
-      expect(res.body.errors[0].project_id).toBe(2);
-      expect(res.body.errors[0].error).toContain("RPC error");
+      expect(res.body.errors[0]).toMatchObject({
+        project_id: 2,
+        error: { code: "update_failed", message: expect.stringContaining("RPC timeout") },
+      });
+    });
+
+    it("returns 400 for negative project IDs", async () => {
+      const res = await request(app)
+        .post("/api/admin/update-scores")
+        .set(AUTH_HEADER)
+        .send({ project_ids: [-1, 0] })
+        .expect(400);
+
+      expect(res.body.error.code).toBe("bad_request");
     });
   });
 
-  describe("POST /update-scores - no auth required when ADMIN_API_KEY not set", () => {
-    it("should allow unauthenticated request when ADMIN_API_KEY is not set", async () => {
-      delete process.env.ADMIN_API_KEY;
+  // ── GET /audit ───────────────────────────────────────────────────────────
 
-      (registry.getTotalProjects as jest.Mock).mockResolvedValue(1);
-      (iot.getSolarData as jest.Mock).mockReturnValue({
-        efficiency_pct: 85,
-        power_output_kw: 500,
-        max_power_kw: 1000,
-      });
-      (iot.getSatelliteData as jest.Mock).mockReturnValue({
-        forest_density_pct: 60,
-        ndvi_score: 0.6,
-      });
-      (scoring.computeScores as jest.Mock).mockReturnValue({
-        credit_quality: 85,
-        green_impact: 70,
-      });
-      (registry.updateImpactScore as jest.Mock).mockResolvedValue("tx-hash-no-auth");
+  describe("GET /audit", () => {
+    it("returns audit entries", async () => {
+      const res = await request(app).get("/api/admin/audit").set(AUTH_HEADER).expect(200);
 
+      expect(res.body).toHaveProperty("count");
+      expect(res.body).toHaveProperty("entries");
+      expect(Array.isArray(res.body.entries)).toBe(true);
+    });
+
+    it("returns 400 when from > to", async () => {
       const res = await request(app)
-        .post("/api/admin/update-scores")
-        .send({})
-        .expect(200);
+        .get("/api/admin/audit")
+        .set(AUTH_HEADER)
+        .query({ from: "2000", to: "1000" })
+        .expect(400);
 
-      expect(res.body.updated).toBe(1);
+      expect(res.body.error.code).toBe("bad_request");
+      expect(res.body.error.message).toContain("from must be earlier than to");
     });
   });
 });

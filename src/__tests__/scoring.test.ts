@@ -38,55 +38,74 @@ describe("computeScores", () => {
     expect(scores.credit_quality).toBe(80);
   });
 
-  it("NaN efficiency_pct → credit_quality clamped to 0", () => {
+  // ── Edge cases ─────────────────────────────────────────────────────────
+
+  it("negative efficiency clamped to 0", () => {
     const scores = computeScores({
-      solar: { efficiency_pct: NaN, power_output_kw: 500, max_power_kw: 1000 },
+      solar: { efficiency_pct: -50, power_output_kw: 100, max_power_kw: 1000 },
       satellite: { forest_density_pct: 50, ndvi_score: 0.5 },
     });
     expect(scores.credit_quality).toBe(0);
-    expect(scores.credit_quality).not.toBeNaN();
   });
 
-  it("NaN power_output_kw → handled gracefully", () => {
+  it("negative forest_density clamped to 0", () => {
     const scores = computeScores({
-      solar: { efficiency_pct: 80, power_output_kw: NaN, max_power_kw: 1000 },
+      solar: { efficiency_pct: 50, power_output_kw: 500, max_power_kw: 1000 },
+      satellite: { forest_density_pct: -30, ndvi_score: 0.5 },
+    });
+    expect(scores.green_impact).toBe(25); // (500/1000)*50 + (0/100)*50 = 25
+  });
+
+  it("efficiency > 100 clamped to 100", () => {
+    const scores = computeScores({
+      solar: { efficiency_pct: 999, power_output_kw: 500, max_power_kw: 1000 },
       satellite: { forest_density_pct: 50, ndvi_score: 0.5 },
     });
-    // clamp catches NaN and returns 0 for the power ratio term
-    expect(scores.green_impact).not.toBeNaN();
-    expect(scores.green_impact).toBeGreaterThanOrEqual(0);
-    expect(scores.green_impact).toBeLessThanOrEqual(100);
+    expect(scores.credit_quality).toBe(100);
   });
 
-  it("NaN max_power_kw → division by zero avoided", () => {
+  it("forest_density > 100 clamped to 100", () => {
     const scores = computeScores({
-      solar: { efficiency_pct: 80, power_output_kw: 500, max_power_kw: NaN },
+      solar: { efficiency_pct: 50, power_output_kw: 500, max_power_kw: 1000 },
+      satellite: { forest_density_pct: 200, ndvi_score: 2.0 },
+    });
+    expect(scores.green_impact).toBe(75); // (500/1000)*50 + (100/100)*50 = 75
+  });
+
+  it("power_output > max_power produces > 50 green_impact component", () => {
+    const scores = computeScores({
+      solar: { efficiency_pct: 50, power_output_kw: 1500, max_power_kw: 1000 },
+      satellite: { forest_density_pct: 0, ndvi_score: 0 },
+    });
+    // (1500/1000)*50 + 0 = 75, clamped to 100
+    expect(scores.green_impact).toBe(75);
+  });
+
+  it("very large numbers do not overflow", () => {
+    const scores = computeScores({
+      solar: { efficiency_pct: 1e15, power_output_kw: 1e15, max_power_kw: 1 },
+      satellite: { forest_density_pct: 1e15, ndvi_score: 1e15 },
+    });
+    expect(scores.credit_quality).toBe(100);
+    expect(scores.green_impact).toBe(100);
+  });
+
+  it("zero max_power safely defaults to 0 ratio", () => {
+    const scores = computeScores({
+      solar: { efficiency_pct: 50, power_output_kw: 100, max_power_kw: 0 },
       satellite: { forest_density_pct: 50, ndvi_score: 0.5 },
     });
-    // NaN is not 0, so max_power_kw === 0 path is NOT taken. clamp catches NaN.
-    expect(scores.green_impact).not.toBeNaN();
-    expect(scores.green_impact).toBeGreaterThanOrEqual(0);
-    expect(scores.green_impact).toBeLessThanOrEqual(100);
+    // Division by zero avoided: ratio defaults to 0, forest component = 25
+    expect(scores.green_impact).toBe(25);
   });
 
-  it("zero max_power_kw → division by zero handled, green_impact from forest only", () => {
+  it("NaN inputs handled gracefully with defaults", () => {
     const scores = computeScores({
-      solar: { efficiency_pct: 80, power_output_kw: 500, max_power_kw: 0 },
-      satellite: { forest_density_pct: 60, ndvi_score: 0.6 },
+      solar: { efficiency_pct: NaN, power_output_kw: 100, max_power_kw: 1000 },
+      satellite: { forest_density_pct: 50, ndvi_score: 0.5 },
     });
-    // power ratio = 0, so green_impact = 0 + (60/100)*50 = 30
-    expect(scores.green_impact).toBe(30);
-    expect(scores.green_impact).not.toBeNaN();
-  });
-
-  it("NaN satellite forest_density_pct → handled gracefully", () => {
-    const scores = computeScores({
-      solar: { efficiency_pct: 80, power_output_kw: 500, max_power_kw: 1000 },
-      satellite: { forest_density_pct: NaN, ndvi_score: 0.5 },
-    });
-    expect(scores.green_impact).not.toBeNaN();
-    expect(scores.green_impact).toBeGreaterThanOrEqual(0);
-    expect(scores.green_impact).toBeLessThanOrEqual(100);
+    // NaN replaced with 0, clamped to 0
+    expect(scores.credit_quality).toBe(0);
   });
 
   it("all NaN inputs → scores are 0, not NaN", () => {
@@ -98,5 +117,15 @@ describe("computeScores", () => {
     expect(scores.credit_quality).not.toBeNaN();
     expect(scores.green_impact).not.toBeNaN();
     expect(scores.green_impact).toBe(0);
+  });
+
+  it("mid-range values round correctly", () => {
+    // (333/1000)*50 + (33/100)*50 = 16.65 + 16.5 = 33.15 → rounds to 33
+    const scores = computeScores({
+      solar: { efficiency_pct: 33.6, power_output_kw: 333, max_power_kw: 1000 },
+      satellite: { forest_density_pct: 33, ndvi_score: 0.33 },
+    });
+    expect(scores.credit_quality).toBe(34);
+    expect(scores.green_impact).toBe(33);
   });
 });

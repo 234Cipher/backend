@@ -1,51 +1,219 @@
-import {
-  Keypair,
-  rpc,
-  Networks,
-  TransactionBuilder,
-} from "@stellar/stellar-sdk";
-import dotenv from "dotenv";
-dotenv.config();
+import { Keypair, rpc, Networks, TransactionBuilder, Account, xdr } from "@stellar/stellar-sdk";
+import { config } from "../config";
+import { RpcConnectionPool } from "./db-pool";
+import { CircuitBreaker } from "./circuit-breaker";
+import { withRetry, isTransientError } from "./retry";
 
-const NETWORK = process.env.STELLAR_NETWORK as "testnet" | "mainnet";
+export const networkPassphrase = config.STELLAR_NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
 
-export const networkPassphrase =
-  NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
+export const rpcPool = new RpcConnectionPool({
+  rpcUrl: config.RPC_URL,
+  allowHttp: false,
+  minConnections: config.DB_POOL_MIN,
+  maxConnections: config.DB_POOL_MAX,
+  acquireTimeoutMs: config.DB_POOL_ACQUIRE_TIMEOUT_MS,
+  healthCheckIntervalMs: config.DB_POOL_HEALTH_CHECK_INTERVAL_MS,
+});
 
-export const rpcServer = new rpc.Server(
-  process.env.RPC_URL || "https://soroban-testnet.stellar.org",
-  { allowHttp: false }
-);
+// ── Circuit Breaker for Stellar RPC (#56) ────────────────────────────────────
+export const rpcBreaker = new CircuitBreaker({
+  failureThreshold: config.RPC_BREAKER_FAILURE_THRESHOLD,
+  recoveryTimeoutMs: config.RPC_BREAKER_RECOVERY_TIMEOUT_MS,
+  name: "StellarRPC",
+});
+
+// ── RPC health tracking (#56) ────────────────────────────────────────────────
+let consecutiveFailures = 0;
+let outageStartedAt: number | null = null;
+let lastSuccessAt: number = Date.now();
+
+function recordRpcSuccess(): void {
+  consecutiveFailures = 0;
+  outageStartedAt = null;
+  lastSuccessAt = Date.now();
+}
+
+function recordRpcFailure(): void {
+  consecutiveFailures++;
+  if (outageStartedAt === null) outageStartedAt = Date.now();
+}
+
+export function isRpcAvailable(): boolean {
+  return rpcBreaker.getState() !== "OPEN";
+}
+
+export function isRpcOutageExtended(thresholdMs: number): boolean {
+  return outageStartedAt !== null && Date.now() - outageStartedAt >= thresholdMs;
+}
+
+export function getRpcStatus(): {
+  consecutiveFailures: number;
+  outageDurationMs: number;
+  lastSuccessAgoMs: number;
+} {
+  return {
+    consecutiveFailures,
+    outageDurationMs: outageStartedAt !== null ? Date.now() - outageStartedAt : 0,
+    lastSuccessAgoMs: Date.now() - lastSuccessAt,
+  };
+}
+
+export function withRpcConnection<T>(fn: (client: rpc.Server) => Promise<T>): Promise<T> {
+  return rpcBreaker.execute(
+    () => rpcPool.withConnection(fn),
+    async () => {
+      throw new RpcDegradedError("Stellar RPC circuit is OPEN – request rejected");
+    },
+  );
+}
 
 export function getAdminKeypair(): Keypair {
-  const secretKey = process.env.ADMIN_SECRET_KEY;
+  const secretKey = config.ADMIN_SECRET_KEY;
   if (!secretKey) throw new Error("ADMIN_SECRET_KEY not set");
   return Keypair.fromSecret(secretKey);
 }
 
-// Takes the XDR of a prepared tx, signs it, submits, and polls until confirmed.
-export async function signAndSubmit(
-  preparedXdr: string,
-  keypair: Keypair
-): Promise<string> {
-  const tx = TransactionBuilder.fromXDR(preparedXdr, networkPassphrase);
-  tx.sign(keypair);
+// ── FIXED SEQUENCE & CONCURRENCY QUEUE MANAGEMENT ───────────────────────────
+let submissionQueue = Promise.resolve();
+// Track the latest local sequence number to prevent simultaneous thread collisions
+let localSequenceTracker: bigint | null = null;
 
-  const result = await rpcServer.sendTransaction(tx);
-  if (result.status === "ERROR") {
-    throw new Error(`Send error: ${JSON.stringify(result.errorResult)}`);
+/** Re-exported so registry/cron can catch it for queue-deferral logic. */
+export class RpcDegradedError extends Error {
+  constructor(msg = "RPC is degraded") {
+    super(msg);
+    this.name = "RpcDegradedError";
+  }
+}
+
+export async function signAndSubmit(
+  client: rpc.Server,
+  preparedXdr: string,
+  keypair: Keypair,
+): Promise<string> {
+  // Queue conflicting sequential transactions cleanly using a single unified promise chain
+  return new Promise((resolve, reject) => {
+    submissionQueue = submissionQueue
+      .then(async () => {
+        try {
+          const hash = await _executeSignAndSubmitWithRetry(client, preparedXdr, keypair);
+          recordRpcSuccess();
+          resolve(hash);
+        } catch (error) {
+          if (isTransientError(error)) recordRpcFailure();
+          reject(error);
+        }
+      })
+      .catch(() => {});
+  });
+}
+
+async function _executeSignAndSubmitWithRetry(
+  client: rpc.Server,
+  preparedXdr: string,
+  keypair: Keypair,
+): Promise<string> {
+  return withRetry(
+    () => _attemptSubmit(client, preparedXdr, keypair),
+    {
+      maxAttempts: config.TX_MAX_RETRIES,
+      baseDelayMs: config.TX_RETRY_BASE_DELAY_MS,
+      maxDelayMs: config.TX_RETRY_MAX_DELAY_MS,
+      jitter: 0.3,
+      label: "stellar:signAndSubmit",
+    },
+  );
+}
+
+async function _attemptSubmit(
+  client: rpc.Server,
+  preparedXdr: string,
+  keypair: Keypair,
+): Promise<string> {
+  let tx = TransactionBuilder.fromXDR(preparedXdr, networkPassphrase) as any;
+
+  // 1. Fetch latest sequence number from ledger state
+  const accountKey = xdr.LedgerKey.account(
+    new xdr.LedgerKeyAccount({
+      accountId: keypair.xdrPublicKey(),
+    }),
+  );
+
+  const accountResponse = await client.getLedgerEntries(accountKey);
+
+  if (accountResponse.entries && accountResponse.entries.length > 0) {
+    const accountEntry = accountResponse.entries[0].val.account();
+    if (accountEntry) {
+      const onChainSequence = BigInt(accountEntry.seqNum().toString());
+
+      // Use the higher value between live ledger and local in-memory tracker
+      if (localSequenceTracker === null || onChainSequence > localSequenceTracker) {
+        localSequenceTracker = onChainSequence;
+      }
+
+      const targetSequence = (localSequenceTracker + 1n).toString();
+      const account = new Account(keypair.publicKey(), targetSequence);
+
+      const builder = new TransactionBuilder(account, {
+        fee: tx.fee,
+        networkPassphrase,
+        timebounds: tx.timeBounds || (tx.tx ? tx.tx.timeBounds : undefined),
+      });
+
+      for (const op of tx.operations) {
+        builder.addOperation(op);
+      }
+
+      tx = builder.build();
+    }
   }
 
-  let getResult: rpc.Api.GetTransactionResponse;
-  let attempts = 0;
-  do {
-    await new Promise((r) => setTimeout(r, 1500));
-    getResult = await rpcServer.getTransaction(result.hash);
-    if (++attempts > 20) throw new Error("Transaction confirmation timeout");
-  } while (getResult.status === rpc.Api.GetTransactionStatus.NOT_FOUND);
+  tx.sign(keypair);
+  const result = await client.sendTransaction(tx);
 
-  if (getResult.status === rpc.Api.GetTransactionStatus.FAILED)
+  if (result.status === "ERROR") {
+    const errorString = JSON.stringify(result.errorResult);
+    const isSequenceConflict =
+      errorString.includes("tx_bad_seq") || errorString.includes("ERR_BAD_SEQ");
+
+    if (isSequenceConflict) {
+      // Force re-fetch from chain on next attempt
+      localSequenceTracker = null;
+    }
+
+    throw new Error(`Send error: ${errorString}`);
+  }
+
+  // Successful dispatch – increment local tracker
+  if (localSequenceTracker !== null) {
+    localSequenceTracker += 1n;
+  }
+
+  // 2. Poll for confirmation
+  let getResult: rpc.Api.GetTransactionResponse;
+  let pollAttempts = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const pollIntervalMs = parseInt(
+    process.env.TX_POLL_INTERVAL_MS || (process.env.NODE_ENV === "test" ? "10" : "1500"),
+    10,
+  );
+
+  try {
+    do {
+      await new Promise<void>((r) => {
+        timer = setTimeout(r, pollIntervalMs);
+      });
+      timer = undefined;
+      getResult = await client.getTransaction(result.hash);
+      if (++pollAttempts > 20) throw new Error("Transaction confirmation timeout");
+    } while (getResult.status === rpc.Api.GetTransactionStatus.NOT_FOUND);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+
+  if (getResult!.status === rpc.Api.GetTransactionStatus.FAILED) {
     throw new Error("Transaction failed on-chain");
+  }
 
   return result.hash;
 }

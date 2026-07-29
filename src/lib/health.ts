@@ -1,7 +1,9 @@
-/**
- * Lightweight process/health state. Tracks server start time and the most
- * recent cron execution so `/health` can report basic operational visibility.
- */
+import { rpcPool, rpcBreaker, getRpcStatus } from "./stellar";
+import type { PoolMetrics } from "./db-pool";
+import type { BreakerMetrics } from "./circuit-breaker";
+import { getSourceHealth, getOutageState, getCacheStats } from "./satellite-sources";
+import { getMigrationHealth } from "./migrations";
+import { listFlags } from "./feature-flags";
 
 const startedAt = Date.now();
 
@@ -15,9 +17,14 @@ export interface CronRun {
 
 let lastCronRun: CronRun | null = null;
 
-/** Record the outcome of a cron tick. Called by the schedulers in index.ts. */
 export function recordCronRun(name: string, status: CronStatus): void {
   lastCronRun = { name, status, at: new Date().toISOString() };
+}
+
+export interface SatelliteHealthReport {
+  sources: ReturnType<typeof getSourceHealth>;
+  cache: ReturnType<typeof getCacheStats>;
+  outage: ReturnType<typeof getOutageState>;
 }
 
 export interface HealthReport {
@@ -25,13 +32,51 @@ export interface HealthReport {
   uptime_seconds: number;
   started_at: string;
   last_cron_run: CronRun | null;
+  db_pool: PoolMetrics;
+  circuit_breaker: BreakerMetrics;
+  rpc_status: ReturnType<typeof getRpcStatus>;
+  satellite_data: SatelliteHealthReport;
+  migrations: Awaited<ReturnType<typeof getMigrationHealth>>;
+  feature_flags: { loaded_count: number };
 }
 
-export function getHealth(): HealthReport {
+export async function getHealth(): Promise<HealthReport> {
   return {
     status: "ok",
     uptime_seconds: Math.floor((Date.now() - startedAt) / 1000),
     started_at: new Date(startedAt).toISOString(),
     last_cron_run: lastCronRun,
+    db_pool: rpcPool.getMetrics(),
+    circuit_breaker: rpcBreaker.getMetrics(),
+    rpc_status: getRpcStatus(),
+    satellite_data: {
+      sources: getSourceHealth(),
+      cache: getCacheStats(),
+      outage: getOutageState(),
+    },
+    migrations: await getMigrationHealth(),
+    feature_flags: { loaded_count: Object.keys(listFlags()).length },
+  };
+}
+
+export interface ReadinessReport {
+  status: "ready" | "not_ready";
+  checks: Record<string, boolean>;
+}
+
+export function getReadiness(): ReadinessReport {
+  const dbMetrics = rpcPool.getMetrics();
+  const dbReady = dbMetrics.active >= 0;
+  const outage = getOutageState();
+  const satelliteReady = outage.consecutiveFailures < 3;
+  const rpcReady = rpcBreaker.getState() !== "OPEN";
+
+  return {
+    status: dbReady && satelliteReady && rpcReady ? "ready" : "not_ready",
+    checks: {
+      database: dbReady,
+      satellite: satelliteReady,
+      rpc_circuit: rpcReady,
+    },
   };
 }
