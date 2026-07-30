@@ -95,6 +95,22 @@ describe("deployment workflow tests (#284)", () => {
       expect(hasCmd || hasEntrypoint).toBe(true);
     });
 
+    it("uses multi-stage build", () => {
+      const content = fs.readFileSync(dockerfilePath, "utf8");
+      const fromCount = (content.match(/^FROM\s+/gm) || []).length;
+      expect(fromCount).toBeGreaterThanOrEqual(2);
+    });
+
+    it("production image runs on port 3001", () => {
+      const content = fs.readFileSync(dockerfilePath, "utf8");
+      expect(content).toMatch(/EXPOSE\s+3001/);
+    });
+
+    it("uses Node.js 20 base image", () => {
+      const content = fs.readFileSync(dockerfilePath, "utf8");
+      expect(content).toMatch(/FROM\s+node:20/);
+    });
+
     it("Dockerfile copies package files before installing dependencies", () => {
       const content = fs.readFileSync(dockerfilePath, "utf8");
       expect(content).toMatch(/COPY.*package/i);

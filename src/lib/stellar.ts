@@ -3,6 +3,7 @@ import { config } from "../config";
 import { RpcConnectionPool } from "./db-pool";
 import { CircuitBreaker } from "./circuit-breaker";
 import { withRetry, isTransientError } from "./retry";
+import { stellarRpcDuration, stellarRpcTotal, txSubmissionTotal } from "./prometheus";
 
 export const networkPassphrase =
   config.STELLAR_NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
@@ -115,12 +116,19 @@ export async function signAndSubmit(
   return new Promise((resolve, reject) => {
     submissionQueue = submissionQueue
       .then(async () => {
+        const end = stellarRpcDuration.startTimer({ operation: "signAndSubmit" });
         try {
           const hash = await _executeSignAndSubmitWithRetry(client, preparedXdr, keypair);
           recordRpcSuccess();
+          end();
+          stellarRpcTotal.inc({ operation: "signAndSubmit", result: "success" });
+          txSubmissionTotal.inc({ result: "success" });
           resolve(hash);
         } catch (error) {
           if (isTransientError(error)) recordRpcFailure();
+          end();
+          stellarRpcTotal.inc({ operation: "signAndSubmit", result: "failure" });
+          txSubmissionTotal.inc({ result: "failure" });
           reject(error);
         }
       })

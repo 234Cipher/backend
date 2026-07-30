@@ -47,6 +47,8 @@ import {
 import { indexer } from "./lib/indexer";
 import { getHealth, getReadiness, recordCronRun } from "./lib/health";
 import { getMetrics } from "./lib/metrics";
+import { register } from "./lib/prometheus";
+import { prometheusMiddleware } from "./middleware/prometheusMiddleware";
 import { attachWebSocketServer } from "./lib/websocket";
 import { rpcPool } from "./lib/stellar";
 import { openApiSpec } from "./lib/swagger";
@@ -123,6 +125,7 @@ const corsOrigin = validateCorsOrigin(env.FRONTEND_URL);
 // across servers regardless of OS locale. Override with e.g. CRON_TIMEZONE=America/New_York.
 const CRON_TIMEZONE = config.CRON_TIMEZONE;
 
+app.use(prometheusMiddleware);
 app.use(tracingMiddleware);
 app.use(securityHeaders);
 app.use(permissionsHeaders);
@@ -141,6 +144,12 @@ app.use(featureFlagContext);
 
 // ── Liveness ────────────────────────────────────────────────────────────────
 app.get("/health", async (_req, res) => res.json(await getHealth()));
+
+// ── Prometheus metrics ──────────────────────────────────────────────────────
+app.get("/metrics", async (_req, res) => {
+  res.set("Content-Type", register.contentType);
+  res.end(await register.metrics());
+});
 
 // ── Readiness ────────────────────────────────────────────────────────────────
 app.get("/ready", (_req, res) => {

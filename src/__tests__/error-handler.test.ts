@@ -17,15 +17,18 @@ function createAppWithError(throwFn: () => void) {
 }
 
 describe("error handling middleware", () => {
-  it("unhandled error returns 500 with JSON body", async () => {
+  it("unhandled error returns 500 with JSON body and INTERNAL_ERROR code", async () => {
     const app = createAppWithError(() => {
       throw new Error("something broke");
     });
     const res = await request(app).get("/error").expect(500);
     expect(res.headers["content-type"]).toMatch(/json/);
-    expect(res.body).toHaveProperty("error");
-    expect(res.body.error).toHaveProperty("code");
-    expect(res.body.error).toHaveProperty("message");
+    expect(res.body).toEqual({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "An unexpected error occurred",
+      },
+    });
   });
 
   it("stack trace is not in response", async () => {
@@ -55,6 +58,19 @@ describe("error handling middleware", () => {
     const res = await request(app).get("/error").expect(422);
     expect(res.body.error.code).toBe("validation_failed");
     expect(res.body.error.message).toBe("bad input");
+  });
+
+  it("catches async route handler errors", async () => {
+    const app = express();
+    app.get("/async-error", async () => {
+      throw new Error("async failure");
+    });
+    app.use(notFoundHandler);
+    app.use(errorHandler);
+
+    const res = await request(app).get("/async-error").expect(500);
+    expect(res.body.error.code).toBe("INTERNAL_ERROR");
+    expect(res.body.error.message).toBe("An unexpected error occurred");
   });
 
   it("SyntaxError from malformed JSON returns 400", async () => {

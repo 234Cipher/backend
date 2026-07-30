@@ -11,6 +11,7 @@ import { broadcastScoreUpdate } from "./websocket";
 import { recordCronRun } from "./health";
 import { logger } from "./logger";
 import { config } from "../config";
+import { cronJobDuration, cronJobTotal } from "./prometheus";
 
 /**
  * Core logic for the hourly score-update cron job. Extracted from src/index.ts
@@ -22,6 +23,7 @@ import { config } from "../config";
  * failure aborts the whole run — there's nothing to iterate without it.
  */
 export async function runHourlyScoreUpdate(): Promise<void> {
+  const endCronTimer = cronJobDuration.startTimer({ job: "score-update" });
   try {
     logger.info("[cron] running hourly score update");
     const total = await getTotalProjects();
@@ -117,6 +119,8 @@ export async function runHourlyScoreUpdate(): Promise<void> {
           `check Soroban RPC connectivity and contract state`,
       );
       recordCronRun("score-update", "error");
+      endCronTimer();
+      cronJobTotal.inc({ job: "score-update", result: "error" });
     } else {
       if (failureCount > 0 && failureRate >= config.CRON_FAILURE_THRESHOLD) {
         logger.error(
@@ -126,11 +130,15 @@ export async function runHourlyScoreUpdate(): Promise<void> {
       }
       logger.info("[cron] hourly score update complete", { total, successCount, failureCount });
       recordCronRun("score-update", "success");
+      endCronTimer();
+      cronJobTotal.inc({ job: "score-update", result: "success" });
     }
   } catch (err: any) {
     if (!isErrorRateLimited("cron:score-update")) {
       logger.error("[cron] score update failed", { error: err?.message });
     }
     recordCronRun("score-update", "error");
+    endCronTimer();
+    cronJobTotal.inc({ job: "score-update", result: "error" });
   }
 }

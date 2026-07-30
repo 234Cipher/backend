@@ -4,11 +4,14 @@ services:
       context: .
       target: production
     ports:
-      - "3000:3000"
+      - "3001:3001"
     env_file:
       - .env
     environment:
       - NODE_ENV=production
+      - PORT=3001
+      - ADMIN_SECRET_KEY=${ADMIN_SECRET_KEY}
+      - PROJECT_REGISTRY_CONTRACT_ID=${PROJECT_REGISTRY_CONTRACT_ID}
       - REDIS_URL=redis://redis:6379
       # Keep the V8 heap ceiling under the container memory limit below (#225).
       - NODE_OPTIONS=--max-old-space-size=384
@@ -29,7 +32,7 @@ services:
           cpus: "0.25"
           memory: 256M
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
       interval: 30s
       timeout: 5s
       retries: 3
