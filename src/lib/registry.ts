@@ -35,12 +35,23 @@ export async function updateImpactScore(
           nativeToScVal(greenImpact, { type: "u32" }),
         ),
       )
-      .setTimeout(30)
+      .setTimeout(config.TX_TIMEOUT_SECONDS)
       .build();
 
     const prepared = await client.prepareTransaction(tx);
     return signAndSubmit(client, prepared.toXDR(), keypair);
   });
+}
+
+/**
+ * Narrowing guard for a failed simulation. Defined locally rather than using
+ * the SDK's `rpc.Api.isSimulationError` so the check stays a plain shape test
+ * and does not depend on that helper being present at runtime.
+ */
+function isSimulationError(
+  sim: rpc.Api.SimulateTransactionResponse,
+): sim is rpc.Api.SimulateTransactionErrorResponse {
+  return "error" in sim && typeof sim.error === "string";
 }
 
 export async function getTotalProjects(): Promise<number> {
@@ -53,7 +64,7 @@ export async function getTotalProjects(): Promise<number> {
 
     const tx = new TransactionBuilder(dummyAccount, { fee: BASE_FEE, networkPassphrase })
       .addOperation(contract.call("total_projects"))
-      .setTimeout(30)
+      .setTimeout(config.TX_TIMEOUT_SECONDS)
       .build();
 
     const end = stellarRpcDuration.startTimer({ operation: "simulateTransaction" });
@@ -69,6 +80,14 @@ export async function getTotalProjects(): Promise<number> {
       stellarRpcTotal.inc({ operation: "simulateTransaction", result: "failure" });
       throw err;
     }
+    const sim = await client.simulateTransaction(tx);
+    if (isSimulationError(sim)) throw new Error(sim.error);
+
+    const retval = sim.result?.retval;
+    if (retval === undefined) {
+      throw new Error("total_projects simulation returned no result value");
+    }
+    return Number(scValToNative(retval));
   });
 }
 

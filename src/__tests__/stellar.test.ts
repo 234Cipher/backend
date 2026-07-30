@@ -17,6 +17,10 @@ const mockConfig: Record<string, unknown> = {
   TX_MAX_RETRIES: 4,
   TX_RETRY_BASE_DELAY_MS: 200,
   TX_RETRY_MAX_DELAY_MS: 10000,
+  POLL_INTERVAL_MS: 10,
+  POLL_MAX_ATTEMPTS: 20,
+  MAX_POWER_KW: 1000,
+  TX_TIMEOUT_SECONDS: 30,
 };
 
 jest.mock("../config", () => ({
