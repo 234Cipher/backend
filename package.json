@@ -2,6 +2,10 @@
   "name": "heliobond-backend",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=20.0.0",
+    "bun": ">=1.0.0"
+  },
   "scripts": {
     "dev": "node --watch -r ts-node/register src/index.ts",
     "dev:no-watch": "ts-node src/index.ts",
