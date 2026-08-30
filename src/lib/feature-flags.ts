@@ -143,6 +143,20 @@ let flags: FlagSet = {};
 const dependencyCache: Map<string, boolean> = new Map();
 
 /**
+ * Generate a cache key for dependency evaluation.
+ * Includes flag name and context properties that affect evaluation.
+ */
+function getDependencyCacheKey(flagName: string, ctx: EvaluationContext): string {
+  // Include all context properties that could affect flag evaluation
+  const contextKey = JSON.stringify({
+    user_id: ctx.user_id,
+    environment: ctx.environment,
+    attributes: ctx.attributes || {}
+  });
+  return `${flagName}:${contextKey}`;
+}
+
+/**
  * Load or replace the entire flag set (e.g. from a JSON config file or remote source).
  */
 export function loadFlags(flagSet: FlagSet): void {
@@ -241,18 +255,47 @@ export function evaluateFlag(flagName: string, ctx: EvaluationContext): Evaluati
   }
 
   // 3. Check dependencies
-  if (flag.depends_on && flag.depends_on.length > 0) {
-    for (const dep of flag.depends_on) {
-      if (!evaluateFlag(dep, ctx).value) {
-        const result: EvaluationResult = {
-          flag: flagName,
-          value: false,
-          reason: "dependency_not_met",
-          metadata: flag.metadata,
-        };
-        recordEvaluation(result, ctx);
-        return result;
+  // Check cache first - even for flags without dependencies (cache as true)
+  const cacheKey = getDependencyCacheKey(flagName, ctx);
+  const cachedResult = dependencyCache.get(cacheKey);
+  
+  if (cachedResult !== undefined) {
+    // If cached result is false, dependencies are not satisfied
+    if (!cachedResult) {
+      const result: EvaluationResult = {
+        flag: flagName,
+        value: false,
+        reason: "dependency_not_met",
+        metadata: flag.metadata,
+      };
+      recordEvaluation(result, ctx);
+      return result;
+    }
+    // If cached result is true, dependencies are satisfied, continue to next checks
+  } else {
+    // Not in cache, evaluate dependencies if any exist
+    let allDependenciesMet = true;
+    if (flag.depends_on && flag.depends_on.length > 0) {
+      for (const dep of flag.depends_on) {
+        if (!evaluateFlag(dep, ctx).value) {
+          allDependenciesMet = false;
+          break;
+        }
       }
+    }
+    
+    // Cache the result (true for no dependencies or all satisfied, false otherwise)
+    dependencyCache.set(cacheKey, allDependenciesMet);
+    
+    if (!allDependenciesMet) {
+      const result: EvaluationResult = {
+        flag: flagName,
+        value: false,
+        reason: "dependency_not_met",
+        metadata: flag.metadata,
+      };
+      recordEvaluation(result, ctx);
+      return result;
     }
   }
 
