@@ -5,7 +5,12 @@ function normalizeRoute(req: Request): string {
   if (req.route?.path) {
     return `${req.baseUrl}${req.route.path}`;
   }
-  return req.originalUrl.split("?")[0];
+  // req.route is only populated for matched routes. For unmatched requests
+  // (404s, scanner/bot traffic, typos) we return a fixed placeholder so the
+  // Prometheus `route` label cardinality stays bounded to the set of actual
+  // registered route patterns rather than growing with every distinct URL a
+  // scanner ever tries.
+  return "unmatched";
 }
 
 export function prometheusMiddleware(req: Request, res: Response, next: NextFunction): void {

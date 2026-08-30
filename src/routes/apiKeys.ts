@@ -11,18 +11,12 @@ import {
 } from "../lib/apiKeys";
 import { badRequest } from "../middleware/errors";
 import { logger } from "../lib/logger";
+import { requireAdminBearer } from "../middleware/requireAdminBearer";
 
 const router = Router();
 
-// Enforce ADMIN_API_KEY if configured
-router.use((req: Request, res: Response, next: NextFunction) => {
-  const apiKey = process.env.ADMIN_API_KEY;
-  if (!apiKey) return next();
-  if (req.headers.authorization !== `Bearer ${apiKey}`) {
-    return res.status(401).json({ error: "unauthorized", message: "Missing or invalid bearer token" });
-  }
-  next();
-});
+// Enforce ADMIN_API_KEY if configured (constant-time comparison)
+router.use(requireAdminBearer);
 
 // Register rotation notification logging
 onRotation((notification) => {
@@ -106,11 +100,12 @@ router.post("/:id/rotate", (req: Request, res: Response, next: NextFunction) => 
   try {
     const id = String(req.params.id);
     const body = req.body || {};
-    const grace_period_ms = body.grace_period_ms
-      ? Number(body.grace_period_ms)
-      : undefined;
+    const grace_period_ms = body.grace_period_ms ? Number(body.grace_period_ms) : undefined;
 
-    if (grace_period_ms !== undefined && (grace_period_ms < 0 || !Number.isFinite(grace_period_ms))) {
+    if (
+      grace_period_ms !== undefined &&
+      (grace_period_ms < 0 || !Number.isFinite(grace_period_ms))
+    ) {
       throw badRequest("grace_period_ms must be a non-negative number");
     }
 

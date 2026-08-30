@@ -6,6 +6,7 @@ import { computeScores } from "../lib/scoring";
 import { getTotalProjects } from "../lib/registry";
 import { validateApiKey, isRateLimited, incrementUsage } from "../lib/apiKeys";
 import { scoreEvents, SCORE_UPDATE_EVENT } from "../lib/events";
+import { timingSafeCompare } from "../lib/timing-safe";
 
 const PROTO_PATH = path.join(__dirname, "../proto/heliobond.proto");
 
@@ -32,7 +33,7 @@ function authenticateGrpc(metadata: grpc.Metadata): { success: boolean; error?: 
   }
 
   const adminKey = process.env.ADMIN_API_KEY;
-  if (adminKey && providedKey === adminKey) {
+  if (adminKey && timingSafeCompare(providedKey, adminKey)) {
     return { success: true };
   }
 
@@ -71,7 +72,10 @@ function getProjectDetails(id: number) {
 }
 
 // Unary handler
-async function getProjectScore(call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>) {
+async function getProjectScore(
+  call: grpc.ServerUnaryCall<any, any>,
+  callback: grpc.sendUnaryData<any>,
+) {
   try {
     const auth = authenticateGrpc(call.metadata);
     if (!auth.success) {

@@ -2,10 +2,15 @@ import { buildSchema } from "graphql";
 import DataLoader from "dataloader";
 import { getSolarData, getSatelliteData } from "../routes/iot";
 import { computeScores } from "../lib/scoring";
-import { createDefaultFinancialInput, calculateNPV, calculatePaybackPeriod } from "../lib/financial";
+import {
+  createDefaultFinancialInput,
+  calculateNPV,
+  calculatePaybackPeriod,
+} from "../lib/financial";
 import { updateImpactScore, getTotalProjects } from "../lib/registry";
 import { recordAudit } from "../lib/audit";
 import { validateApiKey, isRateLimited, incrementUsage } from "../lib/apiKeys";
+import { timingSafeCompare } from "../lib/timing-safe";
 
 // 1. GraphQL SDL Schema
 export const graphqlSchema = buildSchema(`
@@ -84,7 +89,7 @@ export function createGraphQLContext(req: any): GraphQLContext {
   let consumerName = "";
 
   const adminKey = process.env.ADMIN_API_KEY;
-  if (adminKey && providedKey === adminKey) {
+  if (adminKey && timingSafeCompare(providedKey, adminKey)) {
     isAdmin = true;
   } else if (providedKey) {
     const keyRecord = validateApiKey(providedKey);
@@ -154,9 +159,15 @@ class ProjectResolver {
     const paybackResult = calculatePaybackPeriod(input);
 
     const totalBenefits = npvResult.discounted_cash_flows.reduce((acc, cf) => acc + cf.revenue, 0);
-    const totalOpsCosts = npvResult.discounted_cash_flows.reduce((acc, cf) => acc + cf.maintenance_cost, 0);
+    const totalOpsCosts = npvResult.discounted_cash_flows.reduce(
+      (acc, cf) => acc + cf.maintenance_cost,
+      0,
+    );
     const netBenefits = totalBenefits - totalOpsCosts + (input.salvage_value ?? 0);
-    const roi = input.installation_cost > 0 ? (netBenefits - input.installation_cost) / input.installation_cost : 0;
+    const roi =
+      input.installation_cost > 0
+        ? (netBenefits - input.installation_cost) / input.installation_cost
+        : 0;
 
     return {
       installation_cost: input.installation_cost,
@@ -179,7 +190,10 @@ export const graphqlRoot = {
     return new ProjectResolver(id);
   },
 
-  projects: async ({ limit = 10, offset = 0 }: { limit?: number; offset?: number }, context: GraphQLContext) => {
+  projects: async (
+    { limit = 10, offset = 0 }: { limit?: number; offset?: number },
+    context: GraphQLContext,
+  ) => {
     if (!context.isAdmin && !context.isConsumer) {
       throw new Error("Unauthorized: Valid API Key is required");
     }
@@ -235,7 +249,7 @@ export const graphqlRoot = {
 
   updateProjectScores: async (
     { id, creditQuality, greenImpact }: { id: string; creditQuality: number; greenImpact: number },
-    context: GraphQLContext
+    context: GraphQLContext,
   ) => {
     if (!context.isAdmin) {
       throw new Error("Unauthorized: Admin access required");

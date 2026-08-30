@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { validateApiKey, incrementUsage, isRateLimited } from "../lib/apiKeys";
+import { timingSafeCompare } from "../lib/timing-safe";
 
 export interface AuthenticatedRequest extends Request {
   apiKeyInfo?: {
@@ -20,9 +21,9 @@ export function apiKeyAuth(req: AuthenticatedRequest, res: Response, next: NextF
     providedKey = authHeader.substring(7);
   }
 
-  // Fallback / support for existing ADMIN_API_KEY
+  // Fallback / support for existing ADMIN_API_KEY (constant-time comparison)
   const adminKey = process.env.ADMIN_API_KEY;
-  if (adminKey && providedKey === adminKey) {
+  if (adminKey && timingSafeCompare(providedKey, adminKey)) {
     return next();
   }
 

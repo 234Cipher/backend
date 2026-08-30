@@ -1,5 +1,6 @@
 import type { Server as HttpServer, IncomingMessage } from "http";
 import { WebSocketServer, WebSocket } from "ws";
+import { timingSafeCompare } from "./timing-safe";
 
 export interface ScoreUpdate {
   project_id: number;
@@ -56,7 +57,7 @@ function authenticate(req: IncomingMessage): boolean {
   const header = req.headers.authorization;
   const bearer = header?.startsWith("Bearer ") ? header.slice(7) : undefined;
   const token = url.searchParams.get("token") ?? bearer;
-  return token === expected;
+  return token !== undefined && timingSafeCompare(token, expected);
 }
 
 function asIdArray(raw: unknown): number[] {
