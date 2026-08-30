@@ -2,6 +2,15 @@
 
 Node.js oracle server for the Heliobond platform. It simulates IoT sensor data for solar panel and satellite readings, computes impact scores from that data, and submits `update_impact_score` transactions to the Soroban **ProjectRegistry** contract on Stellar. An hourly cron job keeps on-chain scores current automatically; the same logic is exposed over REST for on-demand updates.
 
+## System Overview
+
+Heliobond is a comprehensive platform for green energy investment tracking and impact scoring. The system consists of multiple components:
+
+- **Backend API (this repository)**: Node.js/TypeScript server that computes impact scores and interacts with the Stellar blockchain
+- **Frontend**: User interface for viewing projects and impact scores
+- **Blockchain Contracts**: Soroban smart contracts for project registry and investment tracking
+- **Data Processing**: Components for handling IoT data and financial calculations
+
 ---
 
 ## Architecture
@@ -14,8 +23,8 @@ flowchart TD
 
     subgraph Express["Express (src/index.ts)"]
         H[GET /health]
-        IOT[iot.ts\nGET /api/iot/solar/:id\nGET /api/iot/satellite/:id]
-        ADMIN[admin.ts\nPOST /api/admin/update-scores\n— Bearer token required]
+        IOT[iot.ts\nGET /v1/iot/solar/:id\nGET /v1/iot/satellite/:id]
+        ADMIN[admin.ts\nPOST /v1/admin/update-scores\n— Bearer token required]
         CRON[node-cron\nhourly @ :00]
     end
 
@@ -62,16 +71,27 @@ Full request/response details, validation rules, and error codes are in
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET` | `/health` | — | Liveness + uptime and last cron run |
-| `GET` | `/api/iot/solar/:id` | — | Simulated solar panel reading for project `id` |
-| `GET` | `/api/iot/satellite/:id` | — | Simulated satellite / vegetation reading for project `id` |
-| `GET` | `/api/projects` | — | Paginated list of projects with scores (`?limit=&cursor=`) |
-| `GET` | `/api/projects/:id` | — | Single project detail |
-| `GET` | `/api/portfolio/:address` | — | Indexed deposit/withdraw history for an address |
-| `POST` | `/api/admin/update-scores` | Bearer token | Submit impact score update(s) to the Soroban contract |
+| `GET` | `/v1/iot/solar/:id` | — | Simulated solar panel reading for project `id` |
+| `GET` | `/v1/iot/satellite/:id` | — | Simulated satellite / vegetation reading for project `id` |
+| `GET` | `/v1/projects` | — | Paginated list of projects with scores (`?limit=&cursor=`) |
+| `GET` | `/v1/projects/:id` | — | Single project detail |
+| `GET` | `/v1/portfolio/:address` | — | Indexed deposit/withdraw history for an address |
+| `POST` | `/v1/admin/update-scores` | Bearer token | Submit impact score update(s) to the Soroban contract |
 
-Errors return a consistent `{ "error": "<code>", "message": "<detail>" }` JSON
-shape (never a stack trace). All `/api/*` routes are rate limited and return
-`429` with a `Retry-After` header once the limit is exceeded.
+Errors return a consistent `{ "error": { "code": "<code>", "message": "<detail>" } }`
+JSON shape (never a stack trace). `code` is a stable, machine-readable
+identifier; `message` is human-readable detail. All `/api/*` routes are rate
+limited and return `429` with a `Retry-After` header once the limit is
+exceeded.
+
+```json
+{
+  "error": {
+    "code": "bad_request",
+    "message": "project id must be a positive integer"
+  }
+}
+```
 
 ### `GET /health`
 
@@ -79,7 +99,16 @@ shape (never a stack trace). All `/api/*` routes are rate limited and return
 { "status": "ok" }
 ```
 
-### `GET /api/iot/solar/:id`
+### Project IDs
+
+Every `:id` path parameter is a project ID: a whole number in `1..1000000`
+inclusive. The upper bound is configurable via `MAX_PROJECT_ID`.
+
+Anything else is rejected with `400 bad_request` before the route runs — floats
+(`1.5`), signed values (`-5`, `+5`), exponent notation (`1e6`), surrounding
+whitespace, non-numeric strings, and IDs above the bound.
+
+### `GET /v1/iot/solar/:id`
 
 ```json
 {
@@ -92,7 +121,12 @@ shape (never a stack trace). All `/api/*` routes are rate limited and return
 
 Readings are deterministic per `(project_id, hour)` — the same id returns the same values within a given clock hour.
 
-### `GET /api/iot/satellite/:id`
+Because they are deterministic, readings are cached in memory for the remainder
+of the clock hour instead of being recomputed per request; `timestamp` is still
+the time of the request. Set `IOT_CACHE_DISABLED=true` to recompute every time,
+and `IOT_CACHE_MAX_SIZE` to cap retained entries.
+
+### `GET /v1/iot/satellite/:id`
 
 ```json
 {
@@ -102,7 +136,7 @@ Readings are deterministic per `(project_id, hour)` — the same id returns the 
 }
 ```
 
-### `POST /api/admin/update-scores`
+### `POST /v1/admin/update-scores`
 
 **Headers:** `Authorization: Bearer <ADMIN_API_KEY>`
 
@@ -125,7 +159,12 @@ Omit `project_ids` (or send an empty array) to update every project registered o
       "green_impact": 69
     }
   ],
-  "errors": []
+  "errors": [
+    {
+      "project_id": 4,
+      "error": { "code": "update_failed", "message": "Soroban RPC timeout" }
+    }
+  ]
 }
 ```
 
@@ -147,8 +186,34 @@ green_impact   = clamp(
                  )
 ```
 
-`credit_quality` reflects how efficiently the solar array is operating.  
+`credit_quality` reflects how efficiently the solar array is operating.
 `green_impact` is a 50/50 blend of power production ratio and vegetation health.
+
+---
+
+## Rate Limiting
+
+All API endpoints are rate-limited to prevent abuse and protect against fee-drain attacks on Soroban transactions.
+
+| Limiter | Default Window | Default Max | Applied To |
+|---------|---------------|-------------|------------|
+| Public | 60 seconds | 100 requests/IP | All unauthenticated endpoints |
+| Admin | 60 seconds | 20 requests/IP | All authenticated admin endpoints |
+
+When the limit is exceeded, the API returns `429 Too Many Requests` with:
+- `Retry-After` header (seconds until the window resets)
+- `RateLimit-Remaining: 0` and `RateLimit-Reset` headers (RFC 6585 standard)
+
+```json
+{
+  "error": {
+    "code": "too_many_requests",
+    "message": "Rate limit exceeded. Please retry later."
+  }
+}
+```
+
+Configure via environment variables (see below). Admin limits are stricter because each `POST /v1/admin/update-scores` call triggers on-chain Soroban transactions that cost XLM.
 
 ---
 
@@ -169,6 +234,13 @@ Create a `.env` file (see `.env.example`):
 | `RATE_LIMIT_MAX` | No | `100` | Public max requests per IP per window |
 | `RATE_LIMIT_ADMIN_WINDOW_MS` | No | `RATE_LIMIT_WINDOW_MS` | Admin rate-limit window (ms) |
 | `RATE_LIMIT_ADMIN_MAX` | No | `20` | Admin max requests per IP per window |
+| `POLL_INTERVAL_MS` | No | `1500` | Stellar transaction confirmation polling interval (ms) |
+| `POLL_MAX_ATTEMPTS` | No | `20` | Max polling attempts before timing out |
+| `TX_TIMEOUT_SECONDS` | No | `30` | Soroban transaction timeout (seconds) |
+| `MAX_POWER_KW` | No | `1000` | Maximum simulated solar power output (kW) |
+| `IOT_CACHE_DISABLED` | No | — | `true` bypasses the in-memory IoT reading cache |
+| `IOT_CACHE_MAX_SIZE` | No | `1000` | Max cached IoT readings; oldest are evicted first |
+| `MAX_PROJECT_ID` | No | `1000000` | Inclusive upper bound accepted for a `:id` project param |
 
 ---
 
@@ -187,6 +259,8 @@ cp .env.example .env
 
 # 3. Development (ts-node + hourly cron + 5-min indexer)
 bun run dev          # -> Heliobond backend listening on port 3001
+                     #    watches src/ and restarts on save
+bun run dev:no-watch # same, without file watching
 
 # Verify it's up
 curl http://localhost:3001/health
@@ -198,6 +272,50 @@ bun run build && bun start
 bun run build        # tsc type-check
 bun run test         # jest suite
 ```
+
+
+## Dependency Audit
+
+Dependency vulnerability checks run in the CI workflow for every pull request. The audit gate uses `npm audit --audit-level=high`, so CI fails when npm reports any high or critical dependency vulnerabilities. Moderate and low findings are still included in the workflow summary for visibility.
+
+Run the same audit locally before opening a PR:
+
+```bash
+npm audit --audit-level=high
+```
+
+Use `npm audit --json` if you need machine-readable details while triaging a finding.
+
+## Deployment
+
+### Docker
+Build and run using Docker:
+```bash
+docker build -t heliobond-backend .
+docker run -p 3001:3001 --env-file .env heliobond-backend
+```
+
+### Docker Compose
+Use the provided docker-compose.yml for local development with all dependencies:
+```bash
+docker-compose up
+```
+
+### Production Deployment
+For production deployments, consider:
+1. Using a process manager like PM2 or systemd
+2. Setting up a reverse proxy (Nginx, Caddy)
+3. Configuring SSL/TLS certificates
+4. Implementing proper monitoring and alerting
+
+## Monitoring and Observability
+
+The application includes OpenTelemetry instrumentation for:
+- **Distributed Tracing**: Track requests across services
+- **Metrics**: Monitor performance and resource usage
+- **Logging**: Structured logging with correlation IDs
+
+Configure OpenTelemetry exporters in your environment to send data to your preferred observability platform (Jaeger, Zipkin, Prometheus, etc.).
 
 ---
 
@@ -212,3 +330,62 @@ bun run test         # jest suite
 | Scheduler | `node-cron` v4 |
 | Package manager / test runner | Bun |
 | Test framework | Jest + ts-jest + Supertest |
+| Database | PostgreSQL (via Knex.js) |
+| API Documentation | Swagger/OpenAPI |
+| Monitoring | OpenTelemetry |
+| Containerization | Docker |
+| CI/CD | GitHub Actions |
+
+## Development Guidelines
+
+### Code Quality
+- Use TypeScript strict mode
+- Follow ESLint and Prettier configuration
+- Write comprehensive tests for new features
+- Maintain test coverage above 80%
+
+### Testing
+Run the test suite with:
+```bash
+bun run test           # Run all tests
+bun run test:coverage  # Run tests with coverage report
+```
+
+### Code Style
+- Use meaningful variable and function names
+- Add JSDoc comments for public APIs
+- Follow the existing code patterns and architecture
+- Keep functions small and focused on single responsibilities
+
+## API Documentation
+
+Comprehensive API documentation is available in multiple formats:
+
+### Interactive Documentation
+After starting the server, visit `http://localhost:3001/api-docs` for interactive Swagger UI documentation.
+
+### API Specification
+The full OpenAPI specification is available at `http://localhost:3001/api-docs.json`.
+
+### API.md Reference
+Detailed API reference with examples and error codes is available in [API.md](./API.md).
+
+## Changelog
+
+Notable changes for each version are recorded in [CHANGELOG.md](./CHANGELOG.md),
+which follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Released
+sections are generated by semantic-release from Conventional Commits; add
+unreleased work under `## [Unreleased]` using the template at the bottom of the
+file.
+
+## Contributing
+
+Please read [CONTRIBUTING.md](./CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+
+## Security
+
+For security concerns, please review [SECURITY.md](./SECURITY.md) and report vulnerabilities through the appropriate channels.
+
+## License
+
+This project is licensed under the terms in the [LICENSE](./LICENSE) file.

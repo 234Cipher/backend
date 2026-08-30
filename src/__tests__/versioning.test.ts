@@ -14,6 +14,7 @@ function buildApp() {
 
   app.use("/api", deprecationHeaders, versionHeaders);
   app.get("/api/ping", (_req: Request, res: Response) => res.json({ ok: true }));
+  app.get("/api/v1/ping", (_req: Request, res: Response) => res.json({ ok: true }));
 
   return app;
 }
@@ -38,10 +39,19 @@ describe("API versioning middleware", () => {
     expect(res.body.error).toMatch(/unsupported api version/i);
   });
 
-  it("adds Deprecation header on legacy /api routes", async () => {
+  it("serves the v1 route at /api/v1 and sets the version headers", async () => {
+    const res = await request(app).get("/api/v1/ping");
+    expect(res.status).toBe(200);
+    expect(res.headers["api-version"]).toBe("1");
+    expect(res.body).toEqual({ ok: true });
+  });
+
+  it("keeps legacy /api routes working and adds deprecation headers", async () => {
     const res = await request(app).get("/api/ping");
+    expect(res.status).toBe(200);
     expect(res.headers["deprecation"]).toBe("true");
     expect(res.headers["sunset"]).toBeDefined();
+    expect(res.headers["link"]).toContain("/v1");
   });
 });
 

@@ -5,20 +5,29 @@ Base URL (local): `http://localhost:3001`
 All responses are JSON. Errors use a consistent shape:
 
 ```json
-{ "error": "bad_request", "message": "project id must be a positive integer" }
+{
+  "error": {
+    "code": "bad_request",
+    "message": "project id must be a positive integer"
+  }
+}
 ```
 
-| Status | `error` code         | When |
-|--------|----------------------|------|
-| `400`  | `bad_request`        | Invalid params, body, or malformed JSON |
-| `401`  | `unauthorized`       | Missing/invalid admin bearer token |
-| `404`  | `not_found`          | Unknown route |
-| `429`  | `too_many_requests`  | Rate limit exceeded (see `Retry-After`) |
-| `500`  | `internal_error`     | Unexpected server error |
+`code` is a stable, machine-readable identifier for programmatic handling;
+`message` is human-readable detail.
+
+| Status | `error.code`             | When |
+|--------|--------------------------|------|
+| `400`  | `bad_request`            | Invalid params, body, or malformed JSON |
+| `401`  | `unauthorized`           | Missing/invalid admin bearer token |
+| `404`  | `not_found`              | Unknown route |
+| `429`  | `too_many_requests`      | Rate limit exceeded (see `Retry-After`) |
+| `500`  | `server_misconfigured`   | Admin endpoint called without `ADMIN_API_KEY` configured |
+| `500`  | `internal_error`         | Unexpected server error |
 
 ## Rate limiting
 
-All `/api/*` endpoints are rate limited per client IP. Responses include the
+All `/v1/*` endpoints are rate limited per client IP. Responses include the
 standard `RateLimit-*` headers; a `429` additionally sets `Retry-After`.
 Limits are configurable via environment variables (see
 [`.env.example`](./.env.example)): `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`
@@ -49,7 +58,7 @@ Liveness and basic operational visibility. Not rate limited.
 
 ---
 
-## `GET /api/iot/solar/:id`
+## `GET /v1/iot/solar/:id`
 
 Simulated solar-panel reading for project `id`. Readings are deterministic per
 `(project_id, clock hour)`.
@@ -69,11 +78,11 @@ Simulated solar-panel reading for project `id`. Readings are deterministic per
 }
 ```
 
-**Errors:** `400` if `id` is not a positive integer.
+**Errors:** `400` if `id` is not a whole number in `1..1000000` (bound configurable via `MAX_PROJECT_ID`).
 
 ---
 
-## `GET /api/iot/satellite/:id`
+## `GET /v1/iot/satellite/:id`
 
 Simulated satellite / vegetation reading for project `id`.
 
@@ -91,11 +100,11 @@ Simulated satellite / vegetation reading for project `id`.
 }
 ```
 
-**Errors:** `400` if `id` is not a positive integer.
+**Errors:** `400` if `id` is not a whole number in `1..1000000` (bound configurable via `MAX_PROJECT_ID`).
 
 ---
 
-## `GET /api/projects`
+## `GET /v1/projects`
 
 Paginated list of projects with their computed scores and latest readings.
 
@@ -131,7 +140,7 @@ Paginated list of projects with their computed scores and latest readings.
 
 ---
 
-## `GET /api/projects/:id`
+## `GET /v1/projects/:id`
 
 Detail for a single project.
 
@@ -155,11 +164,11 @@ Detail for a single project.
 }
 ```
 
-**Errors:** `400` if `id` is not a positive integer.
+**Errors:** `400` if `id` is not a whole number in `1..1000000` (bound configurable via `MAX_PROJECT_ID`).
 
 ---
 
-## `GET /api/portfolio/:address`
+## `GET /v1/portfolio/:address`
 
 Indexed deposit/withdraw history and current position for an address.
 
@@ -191,7 +200,7 @@ Indexed deposit/withdraw history and current position for an address.
 
 ---
 
-## `POST /api/admin/update-scores`
+## `POST /v1/admin/update-scores`
 
 Compute and submit `update_impact_score` transactions to the Soroban contract.
 Stricter rate limit than public endpoints.
@@ -220,17 +229,24 @@ Stricter rate limit than public endpoints.
   "results": [
     { "project_id": 1, "tx_hash": "abc123...", "credit_quality": 74, "green_impact": 69 }
   ],
-  "errors": []
+  "errors": [
+    {
+      "project_id": 4,
+      "error": { "code": "update_failed", "message": "Soroban RPC timeout" }
+    }
+  ]
 }
 ```
 
 Per-project failures are collected in `errors` (the request still returns `200`);
-Soroban does not support multi-call batching, so transactions are submitted
+each entry's `error` follows the standard `{ code, message }` shape. Soroban
+does not support multi-call batching, so transactions are submitted
 sequentially.
 
 **Errors:**
 - `400` if `project_ids` is present but not an array of positive integers, or the JSON body is malformed.
 - `401` if `ADMIN_API_KEY` is set and the bearer token is missing/incorrect.
+- `500` (`server_misconfigured`) if `ADMIN_API_KEY` is not configured on the server.
 
 ---
 
