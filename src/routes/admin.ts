@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import { getSolarData, getSatelliteData } from "./iot";
 import { computeScores } from "../lib/scoring";
 import { updateImpactScore, getTotalProjects } from "../lib/registry";
-import { badRequest, parseOptionalInt } from "../middleware/errors";
+import { badRequest, parseOptionalInt, MAX_PROJECT_ID } from "../middleware/errors";
 import { recordAudit, getAuditLog, auditToCsv } from "../lib/audit";
 import { broadcastScoreUpdate } from "../lib/websocket";
 
@@ -32,6 +32,9 @@ function parseProjectIds(body: unknown): number[] | null {
   if (raw.length === 0) return null;
   if (!raw.every((n) => Number.isInteger(n) && (n as number) >= 1)) {
     throw badRequest("project_ids must contain only positive integers");
+  }
+  if (!raw.every((n) => (n as number) <= MAX_PROJECT_ID)) {
+    throw badRequest(`project_ids must not exceed maximum project id ${MAX_PROJECT_ID}`);
   }
   return raw as number[];
 }

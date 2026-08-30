@@ -22,9 +22,15 @@ export function badRequest(message: string): ApiError {
   return new ApiError(400, "bad_request", message);
 }
 
+export const MAX_PROJECT_ID = 100_000;
+
+export function maxProjectId(): number {
+  return MAX_PROJECT_ID;
+}
+
 /**
  * Parse and validate a `:id` style path/route param as a positive integer.
- * Throws `ApiError` (400) on anything that isn't a whole number >= 1.
+ * Throws `ApiError` (400) on anything that isn't a whole number >= 1 and within allowed range.
  */
 export function parseProjectId(raw: string | string[] | undefined, field = "id"): number {
   const value = Array.isArray(raw) ? raw[0] : raw;
@@ -34,6 +40,9 @@ export function parseProjectId(raw: string | string[] | undefined, field = "id")
   const id = Number(value);
   if (!Number.isInteger(id) || id < 1) {
     throw badRequest(`${field} must be a positive integer`);
+  }
+  if (id > MAX_PROJECT_ID) {
+    throw badRequest(`${field} must be a positive integer not exceeding ${MAX_PROJECT_ID}`);
   }
   return id;
 }

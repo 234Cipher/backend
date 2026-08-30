@@ -240,7 +240,23 @@ export const graphqlRoot = {
     if (!context.isAdmin) {
       throw new Error("Unauthorized: Admin access required");
     }
-    const projectId = parseInt(id, 10);
+    if (!/^\d+$/.test(String(id).trim())) {
+      throw new Error("Invalid project id: must be a positive integer");
+    }
+    const projectId = parseInt(String(id).trim(), 10);
+    if (!Number.isInteger(projectId) || projectId < 1) {
+      throw new Error("Invalid project id: must be a positive integer");
+    }
+    const total = await getTotalProjects();
+    if (projectId > total) {
+      throw new Error(`Invalid project id ${projectId}: must be between 1 and ${total}`);
+    }
+    if (!Number.isInteger(creditQuality) || creditQuality < 0 || creditQuality > 100) {
+      throw new Error("creditQuality must be an integer between 0 and 100");
+    }
+    if (!Number.isInteger(greenImpact) || greenImpact < 0 || greenImpact > 100) {
+      throw new Error("greenImpact must be an integer between 0 and 100");
+    }
     const tx_hash = await updateImpactScore(projectId, creditQuality, greenImpact);
 
     recordAudit({

@@ -48,7 +48,7 @@ export interface ScoreChange {
 const subscribers = new Map<string, Subscriber>();
 const templates = new Map<string, EmailTemplate>();
 
-let thresholds: AlertThresholds = {
+const thresholds: AlertThresholds = {
   credit_quality_delta: 5,
   green_impact_delta: 5,
 };
