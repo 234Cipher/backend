@@ -89,6 +89,11 @@ export const config = {
   DB_POOL_ACQUIRE_TIMEOUT_MS: numEnv("DB_POOL_ACQUIRE_TIMEOUT_MS", 5000),
   DB_POOL_HEALTH_CHECK_INTERVAL_MS: numEnv("DB_POOL_HEALTH_CHECK_INTERVAL_MS", 30000),
 
+  /** Database SSL: set this to the path of the CA certificate for your Postgres
+   * instance to enable proper TLS certificate validation. Leave empty to use
+   * the system trust store. */
+  DB_SSL_CA: optionalEnv("DB_SSL_CA", ""),
+
   /** Circuit breaker */
   RPC_BREAKER_FAILURE_THRESHOLD: numEnv("CIRCUIT_BREAKER_THRESHOLD", numEnv("RPC_BREAKER_FAILURE_THRESHOLD", 5)),
   RPC_BREAKER_RECOVERY_TIMEOUT_MS: numEnv("CIRCUIT_BREAKER_COOLDOWN_MS", numEnv("RPC_BREAKER_RECOVERY_TIMEOUT_MS", 30000)),
