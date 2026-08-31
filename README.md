@@ -68,15 +68,15 @@ flowchart TD
 Full request/response details, validation rules, and error codes are in
 [**API.md**](./API.md).
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/health` | — | Liveness + uptime and last cron run |
-| `GET` | `/v1/iot/solar/:id` | — | Simulated solar panel reading for project `id` |
-| `GET` | `/v1/iot/satellite/:id` | — | Simulated satellite / vegetation reading for project `id` |
-| `GET` | `/v1/projects` | — | Paginated list of projects with scores (`?limit=&cursor=`) |
-| `GET` | `/v1/projects/:id` | — | Single project detail |
-| `GET` | `/v1/portfolio/:address` | — | Indexed deposit/withdraw history for an address |
-| `POST` | `/v1/admin/update-scores` | Bearer token | Submit impact score update(s) to the Soroban contract |
+| Method | Path                      | Auth         | Description                                                |
+| ------ | ------------------------- | ------------ | ---------------------------------------------------------- |
+| `GET`  | `/health`                 | —            | Liveness + uptime and last cron run                        |
+| `GET`  | `/v1/iot/solar/:id`       | —            | Simulated solar panel reading for project `id`             |
+| `GET`  | `/v1/iot/satellite/:id`   | —            | Simulated satellite / vegetation reading for project `id`  |
+| `GET`  | `/v1/projects`            | —            | Paginated list of projects with scores (`?limit=&cursor=`) |
+| `GET`  | `/v1/projects/:id`        | —            | Single project detail                                      |
+| `GET`  | `/v1/portfolio/:address`  | —            | Indexed deposit/withdraw history for an address            |
+| `POST` | `/v1/admin/update-scores` | Bearer token | Submit impact score update(s) to the Soroban contract      |
 
 Errors return a consistent `{ "error": { "code": "<code>", "message": "<detail>" } }`
 JSON shape (never a stack trace). `code` is a stable, machine-readable
@@ -141,6 +141,7 @@ and `IOT_CACHE_MAX_SIZE` to cap retained entries.
 **Headers:** `Authorization: Bearer <ADMIN_API_KEY>`
 
 **Body (optional):**
+
 ```json
 { "project_ids": [1, 2, 3] }
 ```
@@ -148,6 +149,7 @@ and `IOT_CACHE_MAX_SIZE` to cap retained entries.
 Omit `project_ids` (or send an empty array) to update every project registered on-chain (fetched via `getTotalProjects()`).
 
 **Response:**
+
 ```json
 {
   "updated": 2,
@@ -195,12 +197,13 @@ green_impact   = clamp(
 
 All API endpoints are rate-limited to prevent abuse and protect against fee-drain attacks on Soroban transactions.
 
-| Limiter | Default Window | Default Max | Applied To |
-|---------|---------------|-------------|------------|
-| Public | 60 seconds | 100 requests/IP | All unauthenticated endpoints |
-| Admin | 60 seconds | 20 requests/IP | All authenticated admin endpoints |
+| Limiter | Default Window | Default Max     | Applied To                        |
+| ------- | -------------- | --------------- | --------------------------------- |
+| Public  | 60 seconds     | 100 requests/IP | All unauthenticated endpoints     |
+| Admin   | 60 seconds     | 20 requests/IP  | All authenticated admin endpoints |
 
 When the limit is exceeded, the API returns `429 Too Many Requests` with:
+
 - `Retry-After` header (seconds until the window resets)
 - `RateLimit-Remaining: 0` and `RateLimit-Reset` headers (RFC 6585 standard)
 
@@ -221,26 +224,26 @@ Configure via environment variables (see below). Admin limits are stricter becau
 
 Create a `.env` file (see `.env.example`):
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `STELLAR_NETWORK` | No | `testnet` | `testnet` or `mainnet` — selects the network passphrase |
-| `ADMIN_SECRET_KEY` | Yes | — | Stellar secret key (`S...`) used to sign transactions |
-| `PROJECT_REGISTRY_CONTRACT_ID` | Yes | — | Soroban contract address for the ProjectRegistry |
-| `RPC_URL` | No | `https://soroban-testnet.stellar.org` | Stellar RPC endpoint |
-| `PORT` | No | `3001` | HTTP port the server listens on |
-| `FRONTEND_URL` | No | `http://localhost:3000` | Origin allowed by CORS |
-| `ADMIN_API_KEY` | No | — | Bearer token for `/api/admin/*`. If unset, auth is skipped (dev only) |
-| `RATE_LIMIT_WINDOW_MS` | No | `60000` | Public rate-limit window (ms) |
-| `RATE_LIMIT_MAX` | No | `100` | Public max requests per IP per window |
-| `RATE_LIMIT_ADMIN_WINDOW_MS` | No | `RATE_LIMIT_WINDOW_MS` | Admin rate-limit window (ms) |
-| `RATE_LIMIT_ADMIN_MAX` | No | `20` | Admin max requests per IP per window |
-| `POLL_INTERVAL_MS` | No | `1500` | Stellar transaction confirmation polling interval (ms) |
-| `POLL_MAX_ATTEMPTS` | No | `20` | Max polling attempts before timing out |
-| `TX_TIMEOUT_SECONDS` | No | `30` | Soroban transaction timeout (seconds) |
-| `MAX_POWER_KW` | No | `1000` | Maximum simulated solar power output (kW) |
-| `IOT_CACHE_DISABLED` | No | — | `true` bypasses the in-memory IoT reading cache |
-| `IOT_CACHE_MAX_SIZE` | No | `1000` | Max cached IoT readings; oldest are evicted first |
-| `MAX_PROJECT_ID` | No | `1000000` | Inclusive upper bound accepted for a `:id` project param |
+| Variable                       | Required | Default                               | Description                                                           |
+| ------------------------------ | -------- | ------------------------------------- | --------------------------------------------------------------------- |
+| `STELLAR_NETWORK`              | No       | `testnet`                             | `testnet` or `mainnet` — selects the network passphrase               |
+| `ADMIN_SECRET_KEY`             | Yes      | —                                     | Stellar secret key (`S...`) used to sign transactions                 |
+| `PROJECT_REGISTRY_CONTRACT_ID` | Yes      | —                                     | Soroban contract address for the ProjectRegistry                      |
+| `RPC_URL`                      | No       | `https://soroban-testnet.stellar.org` | Stellar RPC endpoint                                                  |
+| `PORT`                         | No       | `3001`                                | HTTP port the server listens on                                       |
+| `FRONTEND_URL`                 | No       | `http://localhost:3000`               | Origin allowed by CORS                                                |
+| `ADMIN_API_KEY`                | No       | —                                     | Bearer token for `/api/admin/*`. If unset, auth is skipped (dev only) |
+| `RATE_LIMIT_WINDOW_MS`         | No       | `60000`                               | Public rate-limit window (ms)                                         |
+| `RATE_LIMIT_MAX`               | No       | `100`                                 | Public max requests per IP per window                                 |
+| `RATE_LIMIT_ADMIN_WINDOW_MS`   | No       | `RATE_LIMIT_WINDOW_MS`                | Admin rate-limit window (ms)                                          |
+| `RATE_LIMIT_ADMIN_MAX`         | No       | `20`                                  | Admin max requests per IP per window                                  |
+| `POLL_INTERVAL_MS`             | No       | `1500`                                | Stellar transaction confirmation polling interval (ms)                |
+| `POLL_MAX_ATTEMPTS`            | No       | `20`                                  | Max polling attempts before timing out                                |
+| `TX_TIMEOUT_SECONDS`           | No       | `30`                                  | Soroban transaction timeout (seconds)                                 |
+| `MAX_POWER_KW`                 | No       | `1000`                                | Maximum simulated solar power output (kW)                             |
+| `IOT_CACHE_DISABLED`           | No       | —                                     | `true` bypasses the in-memory IoT reading cache                       |
+| `IOT_CACHE_MAX_SIZE`           | No       | `1000`                                | Max cached IoT readings; oldest are evicted first                     |
+| `MAX_PROJECT_ID`               | No       | `1000000`                             | Inclusive upper bound accepted for a `:id` project param              |
 
 ---
 
@@ -273,7 +276,6 @@ bun run build        # tsc type-check
 bun run test         # jest suite
 ```
 
-
 ## Dependency Audit
 
 Dependency vulnerability checks run in the CI workflow for every pull request. The audit gate uses `npm audit --audit-level=high`, so CI fails when npm reports any high or critical dependency vulnerabilities. Moderate and low findings are still included in the workflow summary for visibility.
@@ -289,20 +291,26 @@ Use `npm audit --json` if you need machine-readable details while triaging a fin
 ## Deployment
 
 ### Docker
+
 Build and run using Docker:
+
 ```bash
 docker build -t heliobond-backend .
 docker run -p 3001:3001 --env-file .env heliobond-backend
 ```
 
 ### Docker Compose
+
 Use the provided docker-compose.yml for local development with all dependencies:
+
 ```bash
 docker-compose up
 ```
 
 ### Production Deployment
+
 For production deployments, consider:
+
 1. Using a process manager like PM2 or systemd
 2. Setting up a reverse proxy (Nginx, Caddy)
 3. Configuring SSL/TLS certificates
@@ -311,6 +319,7 @@ For production deployments, consider:
 ## Monitoring and Observability
 
 The application includes OpenTelemetry instrumentation for:
+
 - **Distributed Tracing**: Track requests across services
 - **Metrics**: Monitor performance and resource usage
 - **Logging**: Structured logging with correlation IDs
@@ -321,37 +330,41 @@ Configure OpenTelemetry exporters in your environment to send data to your prefe
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Runtime | Node.js 20 |
-| Language | TypeScript |
-| HTTP framework | Express 5 |
-| Stellar SDK | `@stellar/stellar-sdk` v15 |
-| Scheduler | `node-cron` v4 |
-| Package manager / test runner | Bun |
-| Test framework | Jest + ts-jest + Supertest |
-| Database | PostgreSQL (via Knex.js) |
-| API Documentation | Swagger/OpenAPI |
-| Monitoring | OpenTelemetry |
-| Containerization | Docker |
-| CI/CD | GitHub Actions |
+| Layer                         | Technology                 |
+| ----------------------------- | -------------------------- |
+| Runtime                       | Node.js 20                 |
+| Language                      | TypeScript                 |
+| HTTP framework                | Express 5                  |
+| Stellar SDK                   | `@stellar/stellar-sdk` v15 |
+| Scheduler                     | `node-cron` v4             |
+| Package manager / test runner | Bun                        |
+| Test framework                | Jest + ts-jest + Supertest |
+| Database                      | PostgreSQL (via Knex.js)   |
+| API Documentation             | Swagger/OpenAPI            |
+| Monitoring                    | OpenTelemetry              |
+| Containerization              | Docker                     |
+| CI/CD                         | GitHub Actions             |
 
 ## Development Guidelines
 
 ### Code Quality
+
 - Use TypeScript strict mode
 - Follow ESLint and Prettier configuration
 - Write comprehensive tests for new features
 - Maintain test coverage above 80%
 
 ### Testing
+
 Run the test suite with:
+
 ```bash
 bun run test           # Run all tests
 bun run test:coverage  # Run tests with coverage report
 ```
 
 ### Code Style
+
 - Use meaningful variable and function names
 - Add JSDoc comments for public APIs
 - Follow the existing code patterns and architecture
@@ -362,12 +375,15 @@ bun run test:coverage  # Run tests with coverage report
 Comprehensive API documentation is available in multiple formats:
 
 ### Interactive Documentation
-After starting the server, visit `http://localhost:3001/api-docs` for interactive Swagger UI documentation.
+
+After starting the server, visit `http://localhost:3001/docs` for interactive Swagger UI documentation.
 
 ### API Specification
-The full OpenAPI specification is available at `http://localhost:3001/api-docs.json`.
+
+The full OpenAPI specification is available at `http://localhost:3001/docs.json`.
 
 ### API.md Reference
+
 Detailed API reference with examples and error codes is available in [API.md](./API.md).
 
 ## Changelog
