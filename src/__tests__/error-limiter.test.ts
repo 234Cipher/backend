@@ -12,4 +12,4 @@ describe('error-limiter', () => {
     resetErrorRateLimit('key');
     expect(isErrorRateLimited('key')).toBe(false);
   });
-)};
+});
