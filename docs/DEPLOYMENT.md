@@ -3,6 +3,10 @@
 How the backend gets built, what it is allowed to consume at runtime, and how it
 reaches staging and production.
 
+Database connections to staging and production use TLS with certificate
+validation. The CA certificate is supplied via the `DATABASE_CA` environment
+variable; `rejectUnauthorized` is never disabled.
+
 ## Resource requirements
 
 The service is a single Node process: an Express API plus a `node-cron` polling
