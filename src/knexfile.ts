@@ -1,5 +1,7 @@
 import type { Knex } from "knex";
 import dotenv from "dotenv";
+import fs from "fs";
+
 dotenv.config();
 
 const baseConfig: Knex.Config = {
@@ -12,10 +14,22 @@ const baseConfig: Knex.Config = {
   pool: {
     min: 2,
     max: 10,
-    acquireTimeoutMillis: 30000,
-    idleTimeoutMillis: 60000,
+    acquireTimeoutMilis: 30000,
+    idleTimeoutMilis: 60000,
   },
 };
+
+function getSslConfig(): any {
+  const caPath =
+    process.env.DB_SSL_CA_PATH || process.env.DB_SSL_CA || process.env.DATABASE_CA;
+  if (caPath) {
+    return {
+      ca: fs.readFileSync(caPath),
+      rejectUnauthorized: true,
+    };
+  }
+  return true;
+}
 
 const config: Record<string, Knex.Config> = {
   development: {
@@ -47,12 +61,12 @@ const config: Record<string, Knex.Config> = {
   staging: {
     ...baseConfig,
     connection: {
-      host: process.env.DB_HOST,
+      host: process.env.DB_HOST,
       port: Number(process.env.DB_PORT) || 5432,
       database: process.env.DB_NAME,
       user: process.env.DB_USER,
       password: process.env.DB_PASSWORD,
-      ssl: true,
+      ssl: getSslConfig(),
     },
   },
 
@@ -60,11 +74,11 @@ const config: Record<string, Knex.Config> = {
     ...baseConfig,
     connection: {
       host: process.env.DB_HOST,
-      port: Number(process.env.DB_PORT) || 5432,
+      port: Number(process.env.DB_PORT || 5432,
       database: process.env.DB_NAME,
       user: process.env.DB_USER,
       password: process.env.DB_PASSWORD,
-      ssl: true,
+      ssl: getSslConfig(),
     },
     pool: {
       min: 5,
