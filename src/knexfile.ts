@@ -1,6 +1,5 @@
 import type { Knex } from "knex";
 import dotenv from "dotenv";
-
 dotenv.config();
 
 const baseConfig: Knex.Config = {
@@ -53,7 +52,7 @@ const config: Record<string, Knex.Config> = {
       database: process.env.DB_NAME,
       user: process.env.DB_USER,
       password: process.env.DB_PASSWORD,
-      ssl: { rejectUnauthorized: false },
+      ssl: true,
     },
   },
 
@@ -65,7 +64,7 @@ const config: Record<string, Knex.Config> = {
       database: process.env.DB_NAME,
       user: process.env.DB_USER,
       password: process.env.DB_PASSWORD,
-      ssl: { rejectUnauthorized: false },
+      ssl: true,
     },
     pool: {
       min: 5,
