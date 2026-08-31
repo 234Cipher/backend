@@ -19,16 +19,16 @@ const baseConfig: Knex.Config = {
   },
 };
 
-function getSslConfig(): any {
+function getSslConfig(): { rejectUnauthorized: true; ca?: string } {
   const caPath =
     process.env.DB_SSL_CA_PATH || process.env.DB_SSL_CA || process.env.DATABASE_CA;
   if (caPath) {
     return {
-      ca: fs.readFileSync(caPath),
+      ca: fs.readFileSync(caPath, "utf8"),
       rejectUnauthorized: true,
     };
   }
-  return true;
+  return { rejectUnauthorized: true };
 }
 
 const config: Record<string, Knex.Config> = {
