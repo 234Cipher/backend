@@ -1,4 +1,4 @@
-name: CI
+name:CI
 
 on:
   push:
@@ -31,7 +31,7 @@ jobs:
             cp package-lock.json package-lock.json.orig
             npm install --package-lock-only --ignore-scripts
             if ! diff -q package-lock.json package-lock.json.orig >/dev/null 2>&1; then
-              echo "::error::package-lock.json is out of sync with package.json. Run 'npm install' locally after any 'bun add / bun update' and commit the updated lockfile."
+              echo "::error::package-lock.json is out of sync with package.json. Run 'npm install' locally after any 'bun ad / bun update' and commit the updated lockfile."
               diff -u package-lock.json.orig package-lock.json | head -n 200 || true
               mv package-lock.json.orig package-lock.json
               exit 1
@@ -39,6 +39,18 @@ jobs:
             echo "package-lock.json is in sync."
             rm package-lock.json.orig
           fi
+
+      - name: Check for insecure TLS configuration
+        run: |
+          if [ ! -f src/knexfile.ts ]; then
+            echo "::error::src/knexfile.ts not found."
+            exit 1
+          fi
+          if grep -q "rejectUnauthorized: false" src/knexfile.ts; then
+            echo "::error::Found insecure TLS configuration (rejectUnauthorized: false) in src/knexfile.ts. Use a proper CA certificate instead."
+            exit 1
+          fi
+          echo "TLS configuration is secure."
 
       - name: Build
         run: bun run build
