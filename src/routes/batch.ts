@@ -5,10 +5,7 @@ import { triggerWebhooks } from "../lib/webhooks";
 import { getSolarData, getSatelliteData } from "./iot";
 import { computeScores } from "../lib/scoring";
 import { updateImpactScore, getTotalProjects } from "../lib/registry";
-import { badRequest } from "../middleware/errors";
-import { tryBeginUpdate, markCompleted, markFailed } from "../lib/duplicate-detection";
-import { RpcDegradedError } from "../lib/registry";
-import { withProjectLock } from "../lib/request-queue";
+import { badRequest, MAX_PROJECT_ID } from "../middleware/errors";
 
 const router = Router();
 
@@ -31,6 +28,9 @@ router.post("/score-update", async (req: Request, res: Response) => {
     }
     if (!body.project_ids.every((n) => Number.isInteger(n) && (n as number) >= 1)) {
       throw badRequest("project_ids must contain only positive integers");
+    }
+    if (!body.project_ids.every((n) => (n as number) <= MAX_PROJECT_ID)) {
+      throw badRequest(`project_ids must not exceed maximum project id ${MAX_PROJECT_ID}`);
     }
     projectIds = body.project_ids as number[];
   } else {

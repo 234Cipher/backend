@@ -1,6 +1,5 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { getSolarData } from "./iot";
-import { getTotalProjects } from "../lib/registry";
 import {
   createDefaultFinancialInput,
   calculateCostBenefit,
@@ -9,7 +8,7 @@ import {
   performSensitivityAnalysis,
   compareROI,
 } from "../lib/financial";
-import { badRequest, parseProjectId, parseOptionalInt } from "../middleware/errors";
+import { badRequest, parseProjectId, maxProjectId } from "../middleware/errors";
 
 const router = Router();
 
@@ -97,9 +96,12 @@ router.get("/roi-comparison", async (req: Request, res: Response, next: NextFunc
   try {
     const idsRaw = req.query.ids as string | undefined;
     if (!idsRaw) throw badRequest("ids query parameter is required (comma-separated)");
+    const maxId = maxProjectId();
     const ids = idsRaw.split(",").map((s) => {
-      const n = Number(s.trim());
-      if (!Number.isInteger(n) || n < 1) throw badRequest(`Invalid project id "${s.trim()}"`);
+      const trimmed = s.trim();
+      const n = Number(trimmed);
+      if (!Number.isInteger(n) || n < 1) throw badRequest(`Invalid project id "${trimmed}"`);
+      if (n > maxId) throw badRequest(`Invalid project id "${trimmed}" exceeds maximum allowed project id ${maxId}`);
       return n;
     });
     if (ids.length === 0) throw badRequest("At least one project id is required");

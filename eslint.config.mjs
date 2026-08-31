@@ -11,6 +11,7 @@ export default tsEslint.config(
     rules: {
       "@typescript-eslint/no-explicit-any": "warn",
       "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
+      "@typescript-eslint/no-namespace": "off",
     },
   },
 );

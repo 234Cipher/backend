@@ -4,7 +4,7 @@ import { getSolarData, getSatelliteData } from "./iot";
 import { computeScores } from "../lib/scoring";
 import { createDefaultFinancialInput, calculateNPV, calculatePaybackPeriod } from "../lib/financial";
 import { getAuditLog } from "../lib/audit";
-import { badRequest } from "../middleware/errors";
+import { badRequest, MAX_PROJECT_ID } from "../middleware/errors";
 
 const router = Router();
 
@@ -230,6 +230,9 @@ router.post("/custom-report", async (req: Request, res: Response, next: NextFunc
       }
       if (!project_ids.every((n) => Number.isInteger(n) && n >= 1)) {
         throw badRequest("project_ids must contain only positive integers");
+      }
+      if (!project_ids.every((n) => (n as number) <= MAX_PROJECT_ID)) {
+        throw badRequest(`project_ids must not exceed maximum project id ${MAX_PROJECT_ID}`);
       }
     }
 

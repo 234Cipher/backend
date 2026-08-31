@@ -1,7 +1,8 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { updateScoreForProject } from "../lib/scoreService";
-import { getTotalProjects } from "../lib/registry";
-import { badRequest, parseOptionalInt, errorBody } from "../middleware/errors";
+import { getSolarData, getSatelliteData } from "./iot";
+import { computeScores } from "../lib/scoring";
+import { updateImpactScore, getTotalProjects } from "../lib/registry";
+import { badRequest, parseOptionalInt, MAX_PROJECT_ID } from "../middleware/errors";
 import { recordAudit, getAuditLog, auditToCsv } from "../lib/audit";
 import { broadcastScoreUpdate } from "../lib/websocket";
 import { tryBeginUpdate, markCompleted, markFailed } from "../lib/duplicate-detection";
@@ -91,7 +92,10 @@ function parseProjectIds(body: unknown): number[] | null {
     }
     projectIds.push(entry);
   }
-  return projectIds;
+  if (!raw.every((n) => (n as number) <= MAX_PROJECT_ID)) {
+    throw badRequest(`project_ids must not exceed maximum project id ${MAX_PROJECT_ID}`);
+  }
+  return raw as number[];
 }
 
 // POST /api/admin/update-scores
