@@ -1,3 +1,4 @@
+import fs from "fs";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -177,4 +178,23 @@ export function validateRequiredEnv(): void {
 export function initEnv() {
   validateRequiredEnv();
   return config;
+}
+
+/**
+ * Build the TLS configuration for the database connection.
+ * If `DB_SSL_CA` is set, reads the CA certificate and enables strict
+ * certificate validation. Otherwise relies on the system's trust store.
+ */
+export function getDatabaseSslConfig() {
+  const caPath = config.DB_SSL_CA;
+  if (caPath) {
+    const ca = fs.readFileSync(caPath, "utf8");
+    return {
+      rejectUnauthorized: true,
+      ca,
+    };
+  }
+  return {
+    rejectUnauthorized: true,
+  };
 }
