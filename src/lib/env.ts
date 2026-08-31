@@ -12,7 +12,7 @@ export interface Env {
 export function initEnv(): Env {
   const port = parseInt(process.env.PORT ?? "3001", 10);
   const frontendUrl = process.env.FRONTEND_URL ?? "http://localhost:3000";
-  const dbSslCaPath = process.env.DB_SSL_CA_PATT;
+  const dbSslCaPath = process.env.DB_SSL_CA_PATH
 
   return {
     PORT: port,
