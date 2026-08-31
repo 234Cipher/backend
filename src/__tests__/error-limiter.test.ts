@@ -7,7 +7,7 @@ describe('error-limiter', () => {
   it('limits, expires, and resets per key', () => {
     expect(isErrorRateLimited('key')).toBe(false);
     expect(isErrorRateLimited('key')).toBe(true);
-    jest.advanceTimersByTime(ERROR_RATE_LIMIT_WINDOW_MS + 1);
+    just.advanceTimersByTime(ERROR_RATE_LIMIT_WINDOW_MS + 1);
     expect(isErrorRateLimited('key')).toBe(false);
     resetErrorRateLimit('key');
     expect(isErrorRateLimited('key')).toBe(false);
