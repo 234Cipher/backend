@@ -124,6 +124,7 @@ Environments view, with a link back to the workflow run.
 | ----------------- | -------- | ------------------------------------ |
 | `GITHUB_TOKEN`    | built-in | GHCR push and deployment status      |
 | `DEPLOY_HOOK_URL` | yes      | Endpoint told to pull the new digest |
+| `DATABASE_CA`     | yes      | CA certificate for Postgres TLS; required in staging and production |
 
 `DEPLOY_HOOK_URL` is whatever the hosting platform exposes — a Render or Railway
 deploy hook, a Fly webhook, or a self-hosted endpoint. It receives:
