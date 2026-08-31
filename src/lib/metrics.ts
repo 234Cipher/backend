@@ -54,12 +54,7 @@ interface PathCounter {
   totalLatencyMs: number;
 }
 
-const startTime = Date.now();
-const requestWindow: RequestEntry[] = [];
-const MAX_WINDOW_SIZE = 10000;
-const methodCounters: { [method: string]: MethodCounter } = {};
-const pathCounters: { [path: string]: PathCounter } = {};
-
+const startTime = Date.now(); const requestWindow: RequestEntry[] = []; const MAX_WINDOW_SIZE = 10000; const methodCounters: { [method: string]: MethodCounter } = {}; const pathCounters: { [path: string]: PathCounter } = {}; 
 export function recordRequest(method: string, path: string, status: number, latencyMs: number): void {
   const timestamp = Date.now();
   requestWindow.push({ method, path, status, latency: latencyMs, timestamp });
