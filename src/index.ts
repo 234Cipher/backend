@@ -496,7 +496,11 @@ app.get("/graphql-playground", (req, res) => {
 });
 
 // Start high-performance gRPC server
-startGrpcServer(50051);
+const grpcServer = startGrpcServer(50051);
+
+// Periodically clear cached secrets so a rotated/compromised upstream
+// secret doesn't stay cached indefinitely (gated on SECRETS_ROTATION_ENABLED).
+startSecretRotation();
 
 // ── Graceful shutdown (#57) ──────────────────────────────────────────────────
 // Track all scheduled cron tasks so we can stop them cleanly.
@@ -541,6 +545,30 @@ async function gracefulShutdown(signal: string): Promise<void> {
     } catch (err: any) {
       logger.error("[shutdown] pool drain error", { error: err?.message });
     }
+
+    // 4. Stop the secret rotation timer so it doesn't keep the process alive
+    // or fire after shutdown begins.
+    stopSecretRotation();
+
+    // 5. Gracefully stop the gRPC server, letting in-flight/streaming RPCs
+    // (e.g. StreamProjectScores) drain instead of being killed mid-stream.
+    logger.info("[shutdown] draining gRPC server…");
+    await new Promise<void>((resolve) => {
+      const forceTimer = setTimeout(() => {
+        logger.warn("[shutdown] gRPC drain timed out, forcing shutdown");
+        grpcServer.forceShutdown();
+        resolve();
+      }, shutdownTimeoutMs);
+      grpcServer.tryShutdown((err) => {
+        clearTimeout(forceTimer);
+        if (err) {
+          logger.error("[shutdown] gRPC shutdown error", { error: err.message });
+        } else {
+          logger.info("[shutdown] gRPC server stopped");
+        }
+        resolve();
+      });
+    });
 
     logger.info("[shutdown] clean exit");
     process.exit(0);
