@@ -20,7 +20,6 @@ const router = Router();
 router.use(extractApiKeyRole);
 router.use(requireApiKeyAuth);
 
-/** A per-project score update that made it onto the ledger (or was deferred). */
 type ScoreUpdateResult = {
   project_id: number;
   tx_hash: string;
@@ -28,10 +27,6 @@ type ScoreUpdateResult = {
   green_impact: number;
 };
 
-/**
- * Discriminated result of one locked project update. The `skipped` flag lets
- * the caller narrow the two shapes apart without a type assertion.
- */
 type ProjectUpdateOutcome =
   { skipped: true; reason: string } | ({ skipped: false } & ScoreUpdateResult);
 
@@ -47,25 +42,12 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
-/**
- * Narrow an Express query value to what `parseOptionalInt` accepts. Express
- * types query entries as a union that also covers nested objects; those are
- * treated as absent rather than being asserted into a string.
- */
 function queryValue(value: unknown): string | string[] | undefined {
   if (typeof value === "string") return value;
   if (isStringArray(value)) return value;
   return undefined;
 }
 
-/**
- * Validate the optional `project_ids` field. Returns a list of ids, or `null`
- * to signal "update every registered project". Throws `ApiError` (400) on
- * anything that isn't an array of positive integers.
- *
- * Each entry is checked individually and copied into a `number[]`, so the
- * returned array is typed by construction rather than by assertion.
- */
 function parseProjectIds(body: unknown): number[] | null {
   if (!isRecord(body)) return null;
 
@@ -113,6 +95,19 @@ router.post(
         projectIds = Array.from({ length: total }, (_, i) => i + 1);
       }
 
+    const results: ScoreUpdateResult[] = [];
+    const errors: Array<{ project_id: number; error: { code: string; message: string } }> = [];
+    const skipped: Array<{ project_id: number; reason: string }> = [];
+
+    for (const projectId of projectIds) {
+      try {
+        const result = await withProjectLock<ProjectUpdateOutcome>(projectId, async () => {
+          const { allowed, reason } = tryBeginUpdate(projectId);
+          if (!allowed) {
+            return { skipped: true, reason };
+          }
+          try {
+            const scoreResult = await updateScoreForProject(projectId);
       const results: ScoreUpdateResult[] = [];
       const errors: Array<{ project_id: number; error: { code: string; message: string } }> = [];
       const skipped: Array<{ project_id: number; reason: string }> = [];
@@ -195,6 +190,17 @@ router.post(
               green_impact: result.green_impact,
             });
           }
+        });
+
+        if (result.skipped) {
+          skipped.push({ project_id: projectId, reason: result.reason });
+          logger.info(`[oracle] skipping project ${projectId}: ${result.reason}`);
+        } else {
+          results.push({
+            project_id: result.project_id,
+            tx_hash: result.tx_hash,
+            credit_quality: result.credit_quality,
+            green_impact: result.green_impact,
         } catch (err) {
           logger.error(`[oracle] project ${projectId} failed`, logger.formatError(err));
           errors.push({
@@ -207,6 +213,11 @@ router.post(
         }
       }
 
+    res.json({ updated: results.length, results, errors, skipped });
+  } catch (error) {
+    next(error);
+  }
+});
       res.json({ updated: results.length, results, errors, skipped });
     } catch (error) {
       // Forward to errorHandler: ApiError → its .status (e.g. 400 for bad input),
