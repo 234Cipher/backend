@@ -13,6 +13,10 @@ updates:
       - dependency-type: "direct"
       - dependency-type: "indirect"
     groups:
+      security:
+        # No dependency-types restriction: a security patch of a production
+        # dependency (stellar-sdk, express, grpc-js, …) is usually higher
+        # priority than a dev-only one and must be grouped here too.
       minor-patch:
         applies-to: version-updates
         update-types:
