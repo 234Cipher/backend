@@ -125,17 +125,28 @@ async function runBatchSequential(
         const id = queue.shift()!;
         active++;
         const itemStart = Date.now();
-        processor(id).then((result) => {
-          result.duration_ms = Date.now() - itemStart;
-          if (result.error) {
-            job.errors.push(result);
-          } else {
-            job.results.push(result);
-          }
-          job.progress.done++;
-          active--;
-          next();
-        });
+        processor(id)
+          .then((result) => {
+            result.duration_ms = Date.now() - itemStart;
+            if (result.error) {
+              job.errors.push(result);
+            } else {
+              job.results.push(result);
+            }
+            job.progress.done++;
+            active--;
+            next();
+          })
+          .catch((err) => {
+            job.errors.push({
+              project_id: id,
+              error: String(err),
+              duration_ms: Date.now() - itemStart,
+            });
+            job.progress.done++;
+            active--;
+            next();
+          });
       }
       if (active === 0 && queue.length === 0) resolve();
     }
