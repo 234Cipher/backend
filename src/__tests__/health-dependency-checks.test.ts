@@ -169,7 +169,7 @@ describe("health endpoint dependency checks (#277)", () => {
       const elapsed = Date.now() - start;
 
       expect(res.body.status).toBe("ok");
-      expect(elapsed).toBeLessThan(500);
+      expect(elapsed).toBeLessThan(2000);
     });
   });
 

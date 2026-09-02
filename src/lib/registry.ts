@@ -4,7 +4,6 @@ import {
   nativeToScVal,
   BASE_FEE,
   scValToNative,
-  rpc,
   Account,
 } from "@stellar/stellar-sdk";
 import { withRpcConnection, networkPassphrase, getAdminKeypair, signAndSubmit } from "./stellar";
@@ -67,17 +66,6 @@ export async function updateImpactScore(
   });
 }
 
-/**
- * Narrowing guard for a failed simulation. Defined locally rather than using
- * the SDK's `rpc.Api.isSimulationError` so the check stays a plain shape test
- * and does not depend on that helper being present at runtime.
- */
-function isSimulationError(
-  sim: rpc.Api.SimulateTransactionResponse,
-): sim is rpc.Api.SimulateTransactionErrorResponse {
-  return "error" in sim && typeof sim.error === "string";
-}
-
 export async function getTotalProjects(): Promise<number> {
   return withRpcConnection(async (client) => {
     const contract = new Contract(REGISTRY_CONTRACT_ID);
@@ -93,6 +81,20 @@ export async function getTotalProjects(): Promise<number> {
 
     const end = stellarRpcDuration.startTimer({ operation: "simulateTransaction" });
     try {
+      const result = (await client.simulateTransaction(tx)) as {
+        error?: unknown;
+        result?: { retval?: unknown };
+      };
+      if (result.error) {
+        throw new Error(String(result.error));
+      }
+      const retval = result.result?.retval;
+      if (retval === undefined) {
+        throw new Error("Simulation result missing retval");
+      }
+      end();
+      stellarRpcTotal.inc({ operation: "simulateTransaction", result: "success" });
+      return Number(scValToNative(retval as any));
       const sim = await client.simulateTransaction(tx);
       if (isSimulationError(sim)) {
         throw new Error(sim.error);
@@ -111,15 +113,6 @@ export async function getTotalProjects(): Promise<number> {
       stellarRpcTotal.inc({ operation: "simulateTransaction", result: "failure" });
       throw err;
     }
-    const sim = (await client.simulateTransaction(
-      tx,
-    )) as rpc.Api.SimulateTransactionSuccessResponse;
-
-    const retval = sim.result!.retval;
-    if (retval === undefined) {
-      throw new Error("total_projects simulation returned no result value");
-    }
-    return Number(scValToNative(retval));
   });
 }
 

@@ -1,3 +1,47 @@
+import { Router, Request, Response as ExpressResponse, NextFunction } from "express";
+import {
+  getSources,
+  configureSource,
+  fetchSatelliteWithFallback,
+  getSourceHealth,
+  registerSource,
+} from "../lib/satellite-sources";
+import { parseProjectId, badRequest } from "../middleware/errors";
+
+const router = Router();
+
+/** GET /v1/satellite-sources — list all configured sources with health */
+router.get("/", (_req: Request, res: ExpressResponse) => {
+  const sources = getSources();
+  const health = getSourceHealth();
+  const healthMap = Object.fromEntries(health.map((h) => [h.name, h]));
+  res.json({
+    sources: sources.map((s) => ({
+      name: s.name,
+      priority: s.priority,
+      enabled: s.enabled,
+      health: healthMap[s.name] ?? { healthy: true, failureCount: 0 },
+    })),
+  });
+});
+
+/** GET /v1/satellite-sources/health — data source health status */
+router.get("/health", (_req: Request, res: ExpressResponse) => {
+  res.json(getSourceHealth());
+});
+
+/**
+ * PATCH /v1/satellite-sources/:name — configure a source (enable/disable, priority)
+ */
+router.patch("/:name", (req: Request, res: ExpressResponse) => {
+  const { enabled, priority } = req.body as { enabled?: boolean; priority?: number };
+
+  if (priority !== undefined && (!Number.isInteger(priority) || priority < 1)) {
+    throw badRequest("priority must be a positive integer");
+  }
+
+  const ok = configureSource(String(req.params.name), { enabled, priority });
+  if (!ok) return res.status(404).json({ error: "source not found" });
 import { Router, Request, Response, NextFunction } from "express";
 import { badRequest, errorBody } from "../middleware/errors";
 import { config } from "../config";
@@ -39,6 +83,29 @@ async function fetchFromCustomUrl(
   if (body.forest_density_pct === undefined || body.forest_density_pct === null) {
     throw new Error(`Custom source ${sourceName} response missing forest_density_pct`);
   }
+
+  return {
+    forest_density_pct: body.forest_density_pct,
+    ndvi_score: body.ndvi_score,
+    timestamp: Date.now(),
+    source: sourceName,
+  };
+}
+
+/**
+ * POST /v1/satellite-sources — register a custom data source adapter.
+ * Body: { name, priority, fetchUrl } — fetchUrl is the external endpoint
+ * queried (via `?projectId=<id>`) for live satellite readings.
+ */
+router.post("/", (req: Request, res: ExpressResponse) => {
+  const { name, priority, fetchUrl } = req.body as {
+    name?: string;
+    priority?: number;
+    fetchUrl?: string;
+  };
+
+  if (!name || typeof name !== "string") {
+    return res.status(400).json({ error: "name is required" });
   if (body.ndvi_score === undefined || body.ndvi_score === null) {
     throw new Error(`Custom source ${sourceName} response missing ndvi_score`);
   }
@@ -66,6 +133,11 @@ async function fetchFromCustomUrl(
   };
 }
 
+/**
+ * GET /v1/satellite-sources/fetch/:projectId
+ * Fetch satellite data using the primary source with automatic fallback.
+ */
+router.get("/fetch/:projectId", async (req: Request, res: ExpressResponse, next: NextFunction) => {
 router.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const projectIdRaw = req.query.projectId;

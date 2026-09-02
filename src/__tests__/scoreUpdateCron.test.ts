@@ -81,10 +81,12 @@ import { fetchSatelliteWithFallback } from "../lib/satellite-sources";
 import { computeScores } from "../lib/scoring";
 import { recordCronRun } from "../lib/health";
 import { markFailed } from "../lib/duplicate-detection";
+import { resetIdempotencyState } from "../lib/scoreService";
 import { clearIdempotencyStore } from "../lib/idempotency";
 
 describe("runHourlyScoreUpdate (cron job execution flow)", () => {
   beforeEach(() => {
+    resetIdempotencyState();
     jest.clearAllMocks();
     clearIdempotencyStore(); // prevent key bleed between tests
     (getSolarData as jest.Mock).mockReturnValue({
