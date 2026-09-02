@@ -93,6 +93,32 @@ if (!process.env.ADMIN_API_KEY) {
 const app = express();
 const PORT = env.PORT;
 
+function parseTimeoutMs(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const REQUEST_TIMEOUT_MS = parseTimeoutMs(process.env.REQUEST_TIMEOUT_MS, 30000);
+const ADMIN_REQUEST_TIMEOUT_MS = parseTimeoutMs(process.env.ADMIN_REQUEST_TIMEOUT_MS, 60000);
+
+function requestTimeout(timeoutMs: number) {
+  return (req: any, res: any, next: any) => {
+    if (res.locals.timeoutTimer) {
+      clearTimeout(res.locals.timeoutTimer);
+    }
+    const timer = setTimeout(() => {
+      if (!res.headersSent) {
+        res.status(408).json({ error: "request_timeout", message: "Request timed out" });
+      }
+      req.destroy();
+    }, timeoutMs);
+    res.locals.timeoutTimer = timer;
+    const clearTimer = () => clearTimeout(timer);
+    res.once("finish", clearTimer);
+    res.once("close", clearTimer);
+    next();
+  };
+}
 // Trust proxy configuration — required for Express to parse X-Forwarded-For
 // via req.ip / req.ips.  Without this, ipWhitelist must hand-parse headers,
 // which is vulnerable to spoofing.
@@ -152,6 +178,9 @@ app.use(
     level: parseInt(process.env.COMPRESSION_LEVEL ?? "6", 10),
   }),
 );
+app.use(requestTimeout(REQUEST_TIMEOUT_MS));
+app.use("/v1/admin", requestTimeout(ADMIN_REQUEST_TIMEOUT_MS));
+app.use("/api/admin", requestTimeout(ADMIN_REQUEST_TIMEOUT_MS));
 app.use(express.json({ limit: env.BODY_SIZE_LIMIT }));
 app.use(sanitizeInputs);
 app.use(csrfProtection);

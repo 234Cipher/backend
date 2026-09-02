@@ -16,6 +16,52 @@ import {
 
 const router = Router();
 
+const ADMIN_REQUEST_TIMEOUT_MS = Number(process.env.ADMIN_REQUEST_TIMEOUT_MS ?? 60000);
+const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS ?? 30000);
+
+export function requestTimeoutMiddleware(timeoutMs: number = REQUEST_TIMEOUT_MS) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      if (!res.headersSent) {
+        res.status(408).json({
+          error: { code: "request_timeout", message: "Request timed out" },
+        });
+      } else {
+        req.destroy();
+      }
+    }, timeoutMs);
+
+    res.on("finish", () => {
+      clearTimeout(timer);
+      if (timedOut) {
+        req.destroy();
+      }
+    });
+    res.on("close", () => clearTimeout(timer));
+    next();
+  };
+}
+
+router.use(requestTimeoutMiddleware(ADMIN_REQUEST_TIMEOUT_MS));
+
+// Bearer token auth — enforced when ADMIN_API_KEY env var is set
+router.use((req: Request, res: Response, next: NextFunction) => {
+  const apiKey = config.ADMIN_API_KEY;
+  if (!apiKey) {
+    return res
+      .status(500)
+      .json(errorBody("server_misconfigured", "Admin API key is not configured"));
+  }
+  // Constant-time compare so response timing can't be used to guess the key.
+  const authorization = req.headers.authorization ?? "";
+  if (!timingSafeCompare(authorization, `Bearer ${apiKey}`)) {
+    return res.status(401).json(errorBody("unauthorized", "Missing or invalid bearer token"));
+  }
+  next();
+});
 // Apply role-based API key authentication to all admin routes
 router.use(extractApiKeyRole);
 router.use(requireApiKeyAuth);
