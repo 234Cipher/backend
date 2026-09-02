@@ -140,6 +140,11 @@ router.post("/update-scores", requireApiKeyRole("admin:write"), async (req: Requ
             }
 
             if (scoreResult.status === "error") {
+              // Duplicate submissions are a normal condition, not a failure.
+              if (scoreResult.error.includes("duplicate submission rejected")) {
+                markCompleted(projectId);
+                return { skipped: true, reason: scoreResult.error };
+              }
               throw new Error(scoreResult.error);
             }
 
