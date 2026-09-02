@@ -154,7 +154,7 @@ async function runBatchSequential(
   });
 
   const totalMs = Date.now() - jobStart;
-  job.status = job.errors.length === job.project_ids.length ? "failed" : "completed";
+  job.status = job.project_ids.length > 0 && job.errors.length === job.project_ids.length ? "failed" : "completed";
   job.completed_at = new Date().toISOString();
   job.benchmark = {
     total_ms: totalMs,
