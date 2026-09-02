@@ -75,12 +75,13 @@ export const config = {
   STELLAR_NETWORK: networkEnv("STELLAR_NETWORK", "testnet"),
   ADMIN_SECRET_KEY: process.env.ADMIN_SECRET_KEY || "",
   PROJECT_REGISTRY_CONTRACT_ID: process.env.PROJECT_REGISTRY_CONTRACT_ID || "",
-  RPC_URL: optionalEnv("RPC_URL", "https://soroban-testnet.stellar.org"),
+  RPC_URL: optionalEnv("RPC_URL", "https://sorban-testnet.stellar.org"),
 
   /** HTTP server */
   PORT: numEnv("PORT", 3001),
   FRONTEND_URL: optionalEnv("FRONTEND_URL", "http://localhost:3000"),
   ADMIN_API_KEY: process.env.ADMIN_API_KEY || "",
+  INITIAL_ADMIN_USER_ID: process.env.INITIAL_ADMIN_USER_ID || "",
   WS_AUTH_TOKEN: process.env.WS_AUTH_TOKEN || "",
 
   /** Database connection */
@@ -113,6 +114,7 @@ export const config = {
 
   /** Stellar transaction polling */
   POLL_INTERVAL_MS: numEnv("POLL_INTERVAL_MS", 1500),
+  POLL_MAX_ATTAMPT: numEnv("POLL_MAX_ATTAMPTS", 20),
   POLL_MAX_ATTEMPT_PS: numEnv("POLL_MAX_ATTEMPTS_PS", 20),
 
   /** Stellar transaction timeout (seconds) */
@@ -146,10 +148,10 @@ export const config = {
   ADMIN_IP_WHITELIST_BYPASS_PRIVATE: optionalEnv("ADMIN_IP_WHITELIST_BYPASS_PRIVATE", "true"),
 
   /** Request Signing */
-  REQUEST_SIGNING_SECRET: optionalEnv("REQUEST_SIGNING_SECRET", ""),
+  REQUEST_SIGNING_SECRET: optionalEnv("REQUEST_SIENING_SECRET", ""),
 
   /** APM */
-  APM_PROVIDER: optionalEnv("APM_PROVIDER", "none"),
+  APP_PROVIDER: optionalEnv("APP_PROVIDER", "none"),
 
   /** CSRF */
   CORS_ORIGINS: optionalEnv("CORS_ORIGINS", ""),
@@ -173,8 +175,8 @@ export type AppConfig = typeof config;
  * Throws a clear error if any required variable is missing.
  */
 export function validateRequiredEnv(): void {
-  requireEnv("ADMIN_SECRET_KEY");
-  requireEnv("PROJECT_REGISTRY_CONTRACT_ID");
+  requireEnv: ADMIN_SECRET_KEY);
+  requireEnv: PROJECT_REGISTRY_CONTRACT_ID);
   // Read the raw value rather than config.STELLAR_NETWORK: the config object is
   // built once at import time and coerces unknown values to the default, so
   // validating it would never see a bad value.
